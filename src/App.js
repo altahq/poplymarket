@@ -22,7 +22,7 @@ const BET_DATES = [
 ];
 
 const MARKETS = [
-  // Sales
+  // Sales + Strategic
   { id: "s1", dept: "Sales", emoji: "💰", label: "$800K Closed Amount", description: "$800K total closed — EMEA +$250K, US +$450K" },
   { id: "s2", dept: "Sales", emoji: "🤝", label: "53 New Clients", description: "53 new clients signed by end of March" },
   { id: "s3", dept: "Sales", emoji: "📊", label: "30% Deal-to-Close Rate", description: "March cohort hits 30% deal-to-close" },
@@ -33,30 +33,48 @@ const MARKETS = [
   { id: "m1", dept: "Marketing", emoji: "📣", label: "1,100 MQAs by EOM", description: "Marketing Qualified Accounts hit 1,100 by end of March" },
   { id: "m2", dept: "Marketing", emoji: "📅", label: "466 Booked Meetings", description: "466 booked meetings achieved by EOM" },
   { id: "m3", dept: "Marketing", emoji: "📰", label: "5 PR Articles by EOM", description: "5 PR articles published by end of March" },
-  { id: "m4", dept: "Marketing", emoji: "🎬", label: "Brand Video by EOM", description: "Brand video launches by end of March" },
+  { id: "m4", dept: "Marketing", emoji: "🎬", label: "Brand Video", description: "Brand video completed and launched" },
+  { id: "m5", dept: "Marketing", emoji: "💬", label: "New Messaging Everywhere", description: "New messaging presence everywhere!" },
   // CX
   { id: "c1", dept: "CX", emoji: "🛡️", label: "Less Than 7 Churns", description: "Churn stays below 7 customers in March" },
   { id: "c2", dept: "CX", emoji: "⚡", label: "<20 Min Response Time", description: "Median response time under 20 minutes" },
-  { id: "c3", dept: "CX", emoji: "🎓", label: "Katie Academy Launched", description: "CS onboarding project goes live" },
-  // Operations
-  { id: "o1", dept: "Operations", emoji: "👥", label: "3 Key Hires Done", description: "People Ops, CS US & IL, Sales IL all hired" },
-  { id: "o2", dept: "Operations", emoji: "💳", label: "100% March Collections", description: "100% collection from all March customers" },
-  { id: "o3", dept: "Operations", emoji: "🏢", label: "New Office Secured", description: "New office / extra space confirmed" },
-  { id: "o4", dept: "Operations", emoji: "💻", label: "20% Software Cost Cut", description: "Software costs reduced by 20%" },
+  { id: "c3", dept: "CX", emoji: "👥", label: "Hire & Ramp 2 Reps", description: "Hiring and ramping 2 CX reps" },
+  { id: "c4", dept: "CX", emoji: "🎓", label: "Katie Academy Launched", description: "\"Katie Academy\" — CS onboarding project goes live" },
+  { id: "c5", dept: "CX", emoji: "🎤", label: "CX Webinar", description: "CX Webinar hosted and delivered" },
+  // Operations & Bizops
+  { id: "o1", dept: "Operations", emoji: "👥", label: "Key Hires Done", description: "Hiring: People Ops, CS US & IL, Sales IL" },
+  { id: "o2", dept: "Operations", emoji: "💳", label: "100% March Collections", description: "100% collection from March customers" },
+  { id: "o3", dept: "Operations", emoji: "📋", label: "Regulation Project", description: "Regulation project completed" },
+  { id: "o4", dept: "Operations", emoji: "🏢", label: "New Office Secured", description: "New office / extra space confirmed" },
+  { id: "o5", dept: "Operations", emoji: "📑", label: "DD for New Investors", description: "Due diligence for new investors completed" },
+  { id: "o6", dept: "Operations", emoji: "💻", label: "20% Software Cost Cut", description: "Software costs reduced by 20%" },
   // Builders
-  { id: "b1", dept: "Builders", emoji: "🏗️", label: "Alta 2.0 Chat Live", description: "Alta 2.0 Advise & Build chat shipped" },
+  { id: "b1", dept: "Builders", emoji: "🏗️", label: "Alta 2.0 Chat Live", description: "Alta 2.0 chat — Advise & Build shipped" },
   { id: "b2", dept: "Builders", emoji: "⚙️", label: "Trigger-Based Actions", description: "Trigger based action system complete" },
-  { id: "b3", dept: "Builders", emoji: "🔗", label: "LinkedIn Comment+InMail", description: "LinkedIn actions (comment + inmail) shipped" },
+  { id: "b3", dept: "Builders", emoji: "👤", label: "Audience — Lista", description: "Audience — Lista, preview and filter shipped" },
+  { id: "b4", dept: "Builders", emoji: "📥", label: "Inbound Flow", description: "Inbound flow system shipped" },
+  { id: "b5", dept: "Builders", emoji: "🌱", label: "Katie the Gardener", description: "Katie the Gardener feature shipped" },
+  { id: "b6", dept: "Builders", emoji: "🔗", label: "LinkedIn Comment+InMail", description: "LinkedIn actions — comment + inmail shipped" },
+  { id: "b7", dept: "Builders", emoji: "🐦", label: "Twitter / Dialer Node", description: "Twitter / Dialer node shipped" },
   // AI Engineers
   { id: "a1", dept: "AI Engineers", emoji: "🤖", label: "Vetric: 40% Call Coverage", description: "Vetric replacement handles 40% of calls" },
   { id: "a2", dept: "AI Engineers", emoji: "📆", label: "Alta Calendar: 5 Customers", description: "Alta calendar adopted by 5 customers" },
-  { id: "a3", dept: "AI Engineers", emoji: "🗃️", label: "Knowledge-Desk Live", description: "Knowledge-desk with all Alta knowledge launched" },
+  { id: "a3", dept: "AI Engineers", emoji: "🎙️", label: "Alta Recorder Used by Alta", description: "Alta recorder used internally by Alta" },
+  { id: "a4", dept: "AI Engineers", emoji: "❓", label: "Ask-Alta in the System", description: "Ask-Alta integrated in the system" },
+  { id: "a5", dept: "AI Engineers", emoji: "🎓", label: "Alta Academy", description: "Alta academy — sales and CS lessons only" },
+  { id: "a6", dept: "AI Engineers", emoji: "📊", label: "All CS Meeting Presentations", description: "All CS meetings presentations automated" },
+  { id: "a7", dept: "AI Engineers", emoji: "📈", label: "Alta Dashboards", description: "Alta dashboards shipped" },
+  { id: "a8", dept: "AI Engineers", emoji: "💼", label: "CS First Customer — Revenue", description: "CS as the first customer — Revenue Planning" },
+  { id: "a9", dept: "AI Engineers", emoji: "🗃️", label: "Knowledge-Desk Live", description: "Knowledge-desk — all Alta knowledge launched" },
   // Design
-  { id: "d1", dept: "Design", emoji: "🎨", label: "2.0 Brand Assets Done", description: "Website, LPs, videos all updated for 2.0 brand" },
-  { id: "d2", dept: "Design", emoji: "🤝", label: "Freelancers Hired", description: "Freelancers onboarded for design work" },
-  // Partnership
-  { id: "p1", dept: "Partnership", emoji: "🚀", label: "Anthropic Partner Launch", description: "Partner launch with Anthropic + joint GTM plan" },
+  { id: "d1", dept: "Design", emoji: "🎥", label: "Social Media & Brand Videos", description: "Creating social media assets and short-form brand videos" },
+  { id: "d2", dept: "Design", emoji: "🤖", label: "AI Tools in Design", description: "AI tools into the process and research" },
+  { id: "d3", dept: "Design", emoji: "🤝", label: "Hiring Freelancers", description: "Design freelancers hired and onboarded" },
+  { id: "d4", dept: "Design", emoji: "🎨", label: "2.0 Brand Efforts", description: "Advancing 2.0 brand efforts — website, LPs, video" },
+  // Partnership & General
+  { id: "p1", dept: "Partnership", emoji: "🚀", label: "Anthropic Partner Launch", description: "1 partner launch (Anthropic) with joint GTM plan" },
   { id: "p2", dept: "Partnership", emoji: "💵", label: "Interest Income >$20K", description: "Interest income exceeds $20K" },
+  { id: "p3", dept: "Partnership", emoji: "🇮🇱", label: "Iran Nuclear & Missiles", description: "Iran nuclear & 90% missiles interceptions" },
 ];
 
 const DEPT_META = {
