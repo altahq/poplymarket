@@ -123,35 +123,38 @@ function getPrice(bets, marketId, direction) {
   return direction === "YES" ? yesAmt / total : noAmt / total;
 }
 
-// Average execution price for buying — prevents buy-sell exploit
+// Log-based integral average price for buying — eliminates convexity exploit
 function calcBuyShares(bets, marketId, direction, amount) {
   const { yesAmt, noAmt } = getPoolAmounts(bets, marketId);
-  const preTotal = yesAmt + noAmt;
-  const prePrice = direction === "YES" ? yesAmt / preTotal : noAmt / preTotal;
+  const total = yesAmt + noAmt;
+  const prePrice = direction === "YES" ? yesAmt / total : noAmt / total;
+  const opposite = direction === "YES" ? noAmt : yesAmt;
+
+  // True average price = integral of price curve as pool changes
+  const avgPrice = 1 - (opposite / amount) * Math.log((total + amount) / total);
 
   const postYes = yesAmt + (direction === "YES" ? amount : 0);
   const postNo  = noAmt  + (direction === "NO"  ? amount : 0);
   const postTotal = postYes + postNo;
   const postPrice = direction === "YES" ? postYes / postTotal : postNo / postTotal;
 
-  const avgPrice = (prePrice + postPrice) / 2;
   return { shares: amount / avgPrice, avgPrice, prePrice, postPrice };
 }
 
-// Average execution price for selling — reverses price impact fairly
+// Log-based integral average price for selling — 2% fee prevents round-trip exploit
 function calcSellPayout(bets, bet) {
   const { yesAmt, noAmt } = getPoolAmounts(bets, bet.market_id);
-  const preTotal = yesAmt + noAmt;
-  const prePrice = bet.direction === "YES" ? yesAmt / preTotal : noAmt / preTotal;
+  const total = yesAmt + noAmt;
+  const opposite = bet.direction === "YES" ? noAmt : yesAmt;
 
-  // After removing this bet from the pool
-  const postYes = yesAmt - (bet.direction === "YES" ? bet.amount : 0);
-  const postNo  = noAmt  - (bet.direction === "NO"  ? bet.amount : 0);
-  const postTotal = postYes + postNo;
-  const postPrice = bet.direction === "YES" ? postYes / postTotal : postNo / postTotal;
+  // Safety: can't sell if it would empty the pool
+  if (bet.amount >= total - 1) return 0;
 
-  const avgPrice = (prePrice + postPrice) / 2;
-  return Math.round((bet.shares || 0) * avgPrice);
+  // True average sell price = integral of price curve as pool decreases
+  const avgSellPrice = 1 - (opposite / bet.amount) * Math.log(total / (total - bet.amount));
+
+  // 2% sell fee + floor to eliminate any remaining exploit
+  return Math.floor((bet.shares || 0) * avgSellPrice * 0.98);
 }
 
 function getProb(bets, marketId) {
@@ -687,6 +690,7 @@ function SellModal({ bet, bets, onConfirm, onClose }) {
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
               <span style={{ fontSize: 12, color: "#64748b" }}>You receive</span>
               <span style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{payout} ◈</span>
+              <span style={{ fontSize: 10, color: "#94a3b8", marginLeft: 4 }}>(2% fee)</span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <span style={{ fontSize: 12, color: "#64748b" }}>P&L</span>
@@ -801,12 +805,7 @@ export default function Poplymarket() {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const [exploring, setExploring] = useState(false); // explore mode before launch
-  const [loginStep, setLoginStep] = useState("email"); // "email" | "otp"
-  const [otpInput, setOtpInput] = useState("");
-  const [otpLoading, setOtpLoading] = useState(false);
-  const [otpCooldown, setOtpCooldown] = useState(0);
   const emailInputRef = useRef(null);
-  const otpInputRef = useRef(null);
 
   const showToast = useCallback((msg, type = "success") => {
     setToast({ msg, type });
@@ -825,10 +824,10 @@ export default function Poplymarket() {
       if (betsRes.data) setBets(betsRes.data);
       if (resRes.data) setResolutions(resRes.data);
 
-      // Restore session via Supabase Auth (secure — email verified)
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user?.email && usersRes.data) {
-        const found = usersRes.data.find(u => u.email?.toLowerCase() === session.user.email.toLowerCase());
+      // Restore session from localStorage
+      const saved = localStorage.getItem("pm3-user");
+      if (saved && usersRes.data) {
+        const found = usersRes.data.find(u => u.name === saved);
         if (found) setCurrentUser(found);
       }
     } catch (e) {
@@ -877,72 +876,32 @@ export default function Poplymarket() {
 
 
   useEffect(() => {
-    if (!currentUser && loginStep === "email" && emailInputRef.current) {
+    if (!currentUser && emailInputRef.current) {
       setTimeout(() => emailInputRef.current?.focus(), 100);
     }
-  }, [currentUser, loginStep]);
+  }, [currentUser]);
 
-  // OTP cooldown timer
-  useEffect(() => {
-    if (otpCooldown <= 0) return;
-    const t = setInterval(() => {
-      setOtpCooldown(c => { if (c <= 1) { clearInterval(t); return 0; } return c - 1; });
-    }, 1000);
-    return () => clearInterval(t);
-  }, [otpCooldown]);
-
-  // Focus OTP input when step changes
-  useEffect(() => {
-    if (loginStep === "otp" && otpInputRef.current) {
-      setTimeout(() => otpInputRef.current?.focus(), 100);
-    }
-  }, [loginStep]);
-
-  // ── STEP 1: SEND VERIFICATION CODE ──
-  const handleSendOtp = async () => {
+  // ── JOIN / LOGIN ──
+  const handleJoin = async () => {
     const email = emailInput.trim().toLowerCase();
     if (!isValidEmail(email)) {
       showToast("Please enter a valid @altahq.com email", "error");
       return;
     }
-    setOtpLoading(true);
-    const { error } = await supabase.auth.signInWithOtp({ email });
-    setOtpLoading(false);
-    if (error) {
-      if (error.message?.toLowerCase().includes("rate") || error.message?.toLowerCase().includes("limit")) {
-        showToast("Too many attempts — wait 60s and try again", "error");
-      } else {
-        showToast(`Error sending code: ${error.message}`, "error");
-      }
-      return;
-    }
-    setLoginStep("otp");
-    setOtpCooldown(60);
-    showToast(`Verification code sent to ${email} 📧`);
-  };
-
-  // ── STEP 2: VERIFY CODE & JOIN ──
-  const handleVerifyOtp = async () => {
-    const email = emailInput.trim().toLowerCase();
-    const token = otpInput.trim();
-    if (token.length < 6) {
-      showToast("Please enter the 6-digit code from your email", "error");
-      return;
-    }
     setJoinLoading(true);
-    const { error: otpError } = await supabase.auth.verifyOtp({ email, token, type: "email" });
-    if (otpError) {
-      setJoinLoading(false);
-      showToast("Invalid or expired code. Please try again.", "error");
-      return;
-    }
-
-    // Verified! Now find or create game user
     const name = extractName(email);
+
+    // Check if this email or name already exists
     let existing = users.find(u => u.email && u.email.toLowerCase() === email);
     if (!existing) existing = users.find(u => u.name.toLowerCase() === name.toLowerCase());
 
     if (existing) {
+      // Security: if account has a registered email, must match
+      if (existing.email && existing.email.toLowerCase() !== email) {
+        setJoinLoading(false);
+        showToast("This name is linked to a different email", "error");
+        return;
+      }
       if (!existing.email) {
         await supabase.from("users").update({ email }).eq("name", existing.name);
         existing = { ...existing, email };
@@ -962,7 +921,11 @@ export default function Poplymarket() {
       .single();
     setJoinLoading(false);
     if (error) {
-      showToast(`Error: ${error.message}`, "error");
+      if (error.code === "23505") {
+        showToast("Name already taken — contact admin", "error");
+      } else {
+        showToast(`Error: ${error.message}`, "error");
+      }
       return;
     }
     setUsers(prev => [...prev, data]);
@@ -1171,89 +1134,31 @@ export default function Poplymarket() {
           </div>
         )}
         <div style={{ background: isBeforeLaunch ? "rgba(255,255,255,0.08)" : "#fff", border: `1px solid ${isBeforeLaunch ? "rgba(255,255,255,0.15)" : "#e2e8f0"}`, borderRadius: 20, padding: 32, boxShadow: isBeforeLaunch ? "0 4px 24px rgba(0,0,0,0.3)" : "0 4px 24px rgba(0,0,0,0.06)" }}>
-          {loginStep === "email" ? (
-            <>
-              <div style={{ fontSize: 12, fontWeight: 600, color: isBeforeLaunch ? "#94a3b8" : "#64748b", letterSpacing: 0.8, marginBottom: 8, textAlign: "left" }}>YOUR ALTA EMAIL</div>
-              <input
-                ref={emailInputRef}
-                value={emailInput}
-                onChange={e => setEmailInput(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && handleSendOtp()}
-                placeholder="yourname@altahq.com"
-                type="email"
-                style={{
-                  width: "100%", padding: "13px 16px", borderRadius: 12,
-                  border: `1.5px solid ${isBeforeLaunch ? "rgba(255,255,255,0.2)" : "#e2e8f0"}`, fontSize: 15, fontFamily: "inherit",
-                  outline: "none", boxSizing: "border-box", marginBottom: 16,
-                  color: isBeforeLaunch ? "#fff" : "#0f172a",
-                  background: isBeforeLaunch ? "rgba(255,255,255,0.08)" : "#f8fafc",
-                }}
-                onFocus={e => e.target.style.borderColor = "#6366f1"}
-                onBlur={e => e.target.style.borderColor = isBeforeLaunch ? "rgba(255,255,255,0.2)" : "#e2e8f0"}
-              />
-              <button onClick={handleSendOtp} disabled={otpLoading} style={{
-                width: "100%", padding: "14px", borderRadius: 12, border: "none",
-                background: otpLoading ? "#94a3b8" : "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "#fff",
-                fontSize: 15, fontWeight: 700, cursor: otpLoading ? "wait" : "pointer", fontFamily: "inherit",
-              }}>{otpLoading ? "Sending code..." : "Send Verification Code 📧"}</button>
-            </>
-          ) : (
-            <>
-              <div style={{
-                fontSize: 13, color: isBeforeLaunch ? "#c7d2fe" : "#6366f1", fontWeight: 600, marginBottom: 4,
-              }}>
-                📧 Code sent to
-              </div>
-              <div style={{
-                fontSize: 12, color: isBeforeLaunch ? "#94a3b8" : "#64748b", marginBottom: 20,
-                wordBreak: "break-all",
-              }}>
-                <strong style={{ color: isBeforeLaunch ? "#fff" : "#0f172a" }}>{emailInput.trim().toLowerCase()}</strong>
-              </div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: isBeforeLaunch ? "#94a3b8" : "#64748b", letterSpacing: 0.8, marginBottom: 8, textAlign: "left" }}>VERIFICATION CODE</div>
-              <input
-                ref={otpInputRef}
-                value={otpInput}
-                onChange={e => setOtpInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                onKeyDown={e => e.key === "Enter" && handleVerifyOtp()}
-                placeholder="000000"
-                type="text"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                style={{
-                  width: "100%", padding: "13px 16px", borderRadius: 12,
-                  border: `1.5px solid ${isBeforeLaunch ? "rgba(255,255,255,0.2)" : "#e2e8f0"}`,
-                  fontSize: 28, fontFamily: "inherit", fontWeight: 700,
-                  outline: "none", boxSizing: "border-box", marginBottom: 16,
-                  color: isBeforeLaunch ? "#fff" : "#0f172a",
-                  background: isBeforeLaunch ? "rgba(255,255,255,0.08)" : "#f8fafc",
-                  textAlign: "center", letterSpacing: 12,
-                }}
-                onFocus={e => e.target.style.borderColor = "#6366f1"}
-                onBlur={e => e.target.style.borderColor = isBeforeLaunch ? "rgba(255,255,255,0.2)" : "#e2e8f0"}
-              />
-              <button onClick={handleVerifyOtp} disabled={joinLoading} style={{
-                width: "100%", padding: "14px", borderRadius: 12, border: "none",
-                background: joinLoading ? "#94a3b8" : "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "#fff",
-                fontSize: 15, fontWeight: 700, cursor: joinLoading ? "wait" : "pointer", fontFamily: "inherit",
-                marginBottom: 12,
-              }}>{joinLoading ? "Verifying..." : "Verify & Enter →"}</button>
-              <div style={{ display: "flex", justifyContent: "center", gap: 16 }}>
-                <button onClick={() => { setLoginStep("email"); setOtpInput(""); }} style={{
-                  background: "none", border: "none", color: isBeforeLaunch ? "#818cf8" : "#6366f1",
-                  fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", padding: "4px 8px",
-                }}>← Change email</button>
-                <button onClick={handleSendOtp} disabled={otpCooldown > 0 || otpLoading} style={{
-                  background: "none", border: "none",
-                  color: otpCooldown > 0 ? (isBeforeLaunch ? "#64748b" : "#94a3b8") : (isBeforeLaunch ? "#818cf8" : "#6366f1"),
-                  fontSize: 12, fontWeight: 600, cursor: otpCooldown > 0 ? "default" : "pointer", fontFamily: "inherit", padding: "4px 8px",
-                }}>{otpCooldown > 0 ? `Resend in ${otpCooldown}s` : "Resend code"}</button>
-              </div>
-            </>
-          )}
+          <div style={{ fontSize: 12, fontWeight: 600, color: isBeforeLaunch ? "#94a3b8" : "#64748b", letterSpacing: 0.8, marginBottom: 8, textAlign: "left" }}>YOUR ALTA EMAIL</div>
+          <input
+            ref={emailInputRef}
+            value={emailInput}
+            onChange={e => setEmailInput(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleJoin()}
+            placeholder="yourname@altahq.com"
+            type="email"
+            style={{
+              width: "100%", padding: "13px 16px", borderRadius: 12,
+              border: `1.5px solid ${isBeforeLaunch ? "rgba(255,255,255,0.2)" : "#e2e8f0"}`, fontSize: 15, fontFamily: "inherit",
+              outline: "none", boxSizing: "border-box", marginBottom: 16,
+              color: isBeforeLaunch ? "#fff" : "#0f172a",
+              background: isBeforeLaunch ? "rgba(255,255,255,0.08)" : "#f8fafc",
+            }}
+            onFocus={e => e.target.style.borderColor = "#6366f1"}
+            onBlur={e => e.target.style.borderColor = isBeforeLaunch ? "rgba(255,255,255,0.2)" : "#e2e8f0"}
+          />
+          <button onClick={handleJoin} disabled={joinLoading} style={{
+            width: "100%", padding: "14px", borderRadius: 12, border: "none",
+            background: joinLoading ? "#94a3b8" : "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "#fff",
+            fontSize: 15, fontWeight: 700, cursor: joinLoading ? "wait" : "pointer", fontFamily: "inherit",
+          }}>{joinLoading ? "Joining..." : "Enter Poplymarket →"}</button>
           <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 14 }}>
-            {loginStep === "email" ? "We'll send a verification code to your email" : "Check your inbox (and spam folder)"}
-            {" · "}<strong style={{ color: isBeforeLaunch ? "#818cf8" : "#6366f1" }}>1,000 ◈</strong> starting tokens
+            Only @altahq.com emails · <strong style={{ color: isBeforeLaunch ? "#818cf8" : "#6366f1" }}>1,000 ◈</strong> starting tokens
           </div>
         </div>
         <div style={{ display: "flex", justifyContent: "center", gap: 24, marginTop: 24 }}>
@@ -1321,7 +1226,7 @@ export default function Poplymarket() {
               padding: "5px 10px", color: "#6366f1", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
             }}>← Countdown</button>
           )}
-          <button onClick={async () => { await supabase.auth.signOut(); setCurrentUser(null); localStorage.removeItem("pm3-user"); setExploring(false); setLoginStep("email"); setOtpInput(""); }} style={{
+          <button onClick={() => { setCurrentUser(null); localStorage.removeItem("pm3-user"); setExploring(false); }} style={{
             background: "transparent", border: "1px solid #e2e8f0", borderRadius: 8,
             padding: "5px 10px", color: "#94a3b8", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
           }}>← Out</button>
