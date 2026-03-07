@@ -14,9 +14,9 @@ const SEED = 100;
 const INITIAL_TOKENS = 1000;
 const ALLOWED_DOMAIN = "altahq.com";
 
-// Launch time: 8 PM Israel time tonight (2026-03-07 20:00 Asia/Jerusalem)
-// Asia/Jerusalem is UTC+2 in winter → 18:00 UTC
-const LAUNCH_TIME = new Date("2026-03-07T20:00:00+02:00").getTime();
+// Launch time: 9 PM Israel time tomorrow (2026-03-08 21:00 Asia/Jerusalem)
+// Asia/Jerusalem is UTC+2 in winter → 19:00 UTC
+const LAUNCH_TIME = new Date("2026-03-08T21:00:00+02:00").getTime();
 
 // Format launch time in the viewer's local timezone
 function getLocalLaunchTime() {
