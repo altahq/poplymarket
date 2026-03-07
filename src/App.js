@@ -706,6 +706,42 @@ export default function Poplymarket() {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
+  // ── AUTH CALLBACK (handles email link clicks) ──
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if ((event === "SIGNED_IN" || event === "PASSWORD_RECOVERY") && session?.user?.email) {
+        const email = session.user.email.toLowerCase();
+        if (!email.endsWith(`@${ALLOWED_DOMAIN}`)) return;
+        // Clean URL hash
+        if (window.location.hash) window.history.replaceState(null, "", window.location.pathname);
+        // Find or create user in our table
+        const name = extractName(email);
+        const freshUsers = (await supabase.from("users").select("*")).data || users;
+        let existing = freshUsers.find(u => u.email && u.email.toLowerCase() === email);
+        if (!existing) existing = freshUsers.find(u => u.name.toLowerCase() === name.toLowerCase());
+        if (existing) {
+          if (!existing.email) {
+            await supabase.from("users").update({ email }).eq("name", existing.name);
+            existing = { ...existing, email };
+          }
+          setCurrentUser(existing);
+          localStorage.setItem("pm3-user", existing.name);
+          showToast(`Welcome back, ${existing.name}! 👋`);
+        } else {
+          const { data } = await supabase.from("users").insert({ name, email, tokens: INITIAL_TOKENS }).select().single();
+          if (data) {
+            setUsers(prev => [...prev, data]);
+            setCurrentUser(data);
+            localStorage.setItem("pm3-user", data.name);
+            fireConfetti();
+            showToast(`Welcome, ${name}! 🎯 1,000 tokens loaded`);
+          }
+        }
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [users, showToast]);
+
   useEffect(() => {
     if (!currentUser && emailInputRef.current) {
       setTimeout(() => emailInputRef.current?.focus(), 100);
