@@ -14,6 +14,10 @@ const SEED = 100;
 const INITIAL_TOKENS = 1000;
 const ALLOWED_DOMAIN = "altahq.com";
 
+// Launch time: 8 PM Israel time tonight (2026-03-07 20:00 Asia/Jerusalem)
+// Asia/Jerusalem is UTC+2 in winter → 18:00 UTC
+const LAUNCH_TIME = new Date("2026-03-07T20:00:00+02:00").getTime();
+
 function extractName(email) {
   const local = email.split("@")[0];
   return local
@@ -148,6 +152,98 @@ function getMyPosition(bets, marketId, userName) {
   const yesCost   = yesBets.reduce((s, b) => s + b.amount, 0);
   const noCost    = noBets.reduce((s, b) => s + b.amount, 0);
   return { yesBets, noBets, yesShares, noShares, yesCost, noCost, totalCost: yesCost + noCost, totalBets: my.length };
+}
+
+// ─── COUNTDOWN SCREEN ────────────────────────────────────────────────────────────
+function CountdownScreen({ users }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const diff = Math.max(0, LAUNCH_TIME - now);
+  const hours = Math.floor(diff / 3600000);
+  const minutes = Math.floor((diff % 3600000) / 60000);
+  const seconds = Math.floor((diff % 60000) / 1000);
+  const pad = n => String(n).padStart(2, "0");
+
+  return (
+    <div style={{
+      background: "linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%)",
+      minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
+      fontFamily: "DM Sans, sans-serif", padding: 20, overflow: "hidden", position: "relative",
+    }}>
+      {/* Animated background particles */}
+      <style>{`
+        @keyframes float { 0%, 100% { transform: translateY(0) scale(1); opacity: 0.3; } 50% { transform: translateY(-30px) scale(1.2); opacity: 0.6; } }
+        @keyframes pulse2 { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+        @keyframes glow { 0%, 100% { box-shadow: 0 0 20px rgba(99,102,241,0.3); } 50% { box-shadow: 0 0 40px rgba(99,102,241,0.6); } }
+      `}</style>
+      <div style={{ textAlign: "center", maxWidth: 520, width: "100%", position: "relative", zIndex: 1 }}>
+        <div style={{ fontSize: 64, marginBottom: 16, animation: "pulse2 2s infinite" }}>🎯</div>
+        <div style={{ fontSize: 48, fontWeight: 800, letterSpacing: "-2px", color: "#fff", marginBottom: 4 }}>
+          Poply<span style={{ color: "#818cf8" }}>market</span>
+        </div>
+        <div style={{ color: "#94a3b8", fontSize: 15, marginBottom: 48 }}>
+          Alta's March 2026 Prediction Market
+        </div>
+
+        {/* Countdown */}
+        <div style={{ marginBottom: 40 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "#6366f1", letterSpacing: 2, marginBottom: 16, textTransform: "uppercase" }}>
+            Markets open in
+          </div>
+          <div style={{ display: "flex", justifyContent: "center", gap: 12 }}>
+            {[
+              { val: pad(hours), label: "HOURS" },
+              { val: pad(minutes), label: "MIN" },
+              { val: pad(seconds), label: "SEC" },
+            ].map(({ val, label }) => (
+              <div key={label} style={{
+                background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.3)",
+                borderRadius: 16, padding: "20px 24px", minWidth: 90,
+                animation: "glow 3s infinite",
+              }}>
+                <div style={{ fontSize: 44, fontWeight: 800, color: "#fff", fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>
+                  {val}
+                </div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: "#818cf8", letterSpacing: 1.5, marginTop: 8 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Launch time */}
+        <div style={{
+          background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: 16, padding: "20px 28px", marginBottom: 32,
+        }}>
+          <div style={{ fontSize: 13, color: "#cbd5e1", marginBottom: 4 }}>
+            🕗 Tonight at <strong style={{ color: "#fff" }}>8:00 PM</strong> Israel time
+          </div>
+          <div style={{ fontSize: 12, color: "#64748b" }}>
+            {MARKETS.length} markets · 1,000 ◈ starting tokens · Bet on Alta's March goals
+          </div>
+        </div>
+
+        {/* Players waiting */}
+        <div style={{ display: "flex", justifyContent: "center", gap: 28 }}>
+          {[
+            ["🏦", `${MARKETS.length}`, "Markets"],
+            ["👥", `${users.length}`, "Players ready"],
+            ["◈", "1,000", "Starting tokens"],
+          ].map(([icon, val, label]) => (
+            <div key={label} style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 11, color: "#64748b" }}>{icon}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>{val}</div>
+              <div style={{ fontSize: 10, color: "#64748b" }}>{label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─── CONFETTI ───────────────────────────────────────────────────────────────────
@@ -908,6 +1004,19 @@ export default function Poplymarket() {
   const myStaked = myActiveBets.reduce((s, b) => s + b.amount, 0);
   const myUnrealizedPnL = myPosValue - myStaked;
 
+  // Countdown tick — re-render every second while before launch
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (Date.now() >= LAUNCH_TIME) return;
+    const t = setInterval(() => {
+      setTick(x => x + 1);
+      if (Date.now() >= LAUNCH_TIME) clearInterval(t);
+    }, 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const isBeforeLaunch = Date.now() < LAUNCH_TIME;
+
   if (loading) return (
     <div style={{ background: "#f8fafc", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "DM Sans, sans-serif" }}>
       <div style={{ textAlign: "center" }}>
@@ -917,6 +1026,9 @@ export default function Poplymarket() {
       </div>
     </div>
   );
+
+  // Show countdown if before launch (admins bypass)
+  if (isBeforeLaunch && !isAdmin) return <CountdownScreen users={users} />;
 
   // ── LOGIN SCREEN ──
   if (!currentUser) return (
