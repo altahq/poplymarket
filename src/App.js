@@ -154,8 +154,8 @@ function getMyPosition(bets, marketId, userName) {
   return { yesBets, noBets, yesShares, noShares, yesCost, noCost, totalCost: yesCost + noCost, totalBets: my.length };
 }
 
-// ─── COUNTDOWN SCREEN ────────────────────────────────────────────────────────────
-function CountdownScreen({ users }) {
+// ─── COUNTDOWN SCREEN (logged-in user waiting for launch) ─────────────────────
+function CountdownScreen({ users, currentUser, onLogout }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -174,7 +174,6 @@ function CountdownScreen({ users }) {
       minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
       fontFamily: "DM Sans, sans-serif", padding: 20, overflow: "hidden", position: "relative",
     }}>
-      {/* Animated background particles */}
       <style>{`
         @keyframes float { 0%, 100% { transform: translateY(0) scale(1); opacity: 0.3; } 50% { transform: translateY(-30px) scale(1.2); opacity: 0.6; } }
         @keyframes pulse2 { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
@@ -213,6 +212,21 @@ function CountdownScreen({ users }) {
             ))}
           </div>
         </div>
+
+        {/* Logged-in user badge */}
+        {currentUser && (
+          <div style={{
+            background: "rgba(99,102,241,0.2)", border: "1px solid rgba(99,102,241,0.4)",
+            borderRadius: 12, padding: "12px 20px", marginBottom: 20,
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+          }}>
+            <span style={{ fontSize: 16 }}>✅</span>
+            <span style={{ color: "#c7d2fe", fontSize: 14, fontWeight: 600 }}>
+              Welcome, <span style={{ color: "#fff" }}>{currentUser.name}</span>! You're in.
+            </span>
+            <span style={{ color: "#818cf8", fontSize: 12 }}>{currentUser.tokens.toLocaleString()} ◈</span>
+          </div>
+        )}
 
         {/* Launch time */}
         <div style={{
@@ -953,14 +967,22 @@ export default function Poplymarket() {
     const totalWinShares = winners.reduce((s, b) => s + (b.shares || 0), 0);
     const payoutPerShare = totalWinShares > 0 ? totalPool / totalWinShares : 0;
 
+    // Aggregate payouts per user first to avoid stale-balance overwrites
+    const payoutsByUser = {};
     for (const bet of winners) {
       const payout = Math.round((bet.shares || 0) * payoutPerShare);
-      const user = users.find(u => u.name === bet.user_name);
-      if (user && payout > 0) {
+      if (payout > 0) {
+        payoutsByUser[bet.user_name] = (payoutsByUser[bet.user_name] || 0) + payout;
+      }
+    }
+
+    for (const [userName, totalPayout] of Object.entries(payoutsByUser)) {
+      const user = users.find(u => u.name === userName);
+      if (user) {
         await supabase
           .from("users")
-          .update({ tokens: user.tokens + payout })
-          .eq("name", user.name);
+          .update({ tokens: user.tokens + totalPayout })
+          .eq("name", userName);
       }
     }
 
@@ -1027,20 +1049,26 @@ export default function Poplymarket() {
     </div>
   );
 
-  // Show countdown if before launch (admins bypass)
-  if (isBeforeLaunch && !isAdmin) return <CountdownScreen users={users} />;
-
-  // ── LOGIN SCREEN ──
+  // ── LOGIN SCREEN (show BEFORE countdown so users can register) ──
   if (!currentUser) return (
-    <div style={{ background: "linear-gradient(135deg, #f8fafc 0%, #eff6ff 50%, #f5f3ff 100%)", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "DM Sans, sans-serif", padding: "20px" }}>
+    <div style={{ background: isBeforeLaunch ? "linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%)" : "linear-gradient(135deg, #f8fafc 0%, #eff6ff 50%, #f5f3ff 100%)", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "DM Sans, sans-serif", padding: "20px" }}>
       <div style={{ maxWidth: 420, width: "100%", textAlign: "center" }}>
         <div style={{ fontSize: 48, marginBottom: 8 }}>🎯</div>
-        <div style={{ fontSize: 40, fontWeight: 800, letterSpacing: "-1.5px", color: "#0f172a", marginBottom: 4 }}>
-          Poply<span style={{ color: "#6366f1" }}>market</span>
+        <div style={{ fontSize: 40, fontWeight: 800, letterSpacing: "-1.5px", color: isBeforeLaunch ? "#fff" : "#0f172a", marginBottom: 4 }}>
+          Poply<span style={{ color: isBeforeLaunch ? "#818cf8" : "#6366f1" }}>market</span>
         </div>
-        <div style={{ color: "#64748b", fontSize: 14, marginBottom: 40 }}>Alta's March 2026 Prediction Market</div>
-        <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 20, padding: 32, boxShadow: "0 4px 24px rgba(0,0,0,0.06)" }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "#64748b", letterSpacing: 0.8, marginBottom: 8, textAlign: "left" }}>YOUR ALTA EMAIL</div>
+        <div style={{ color: isBeforeLaunch ? "#94a3b8" : "#64748b", fontSize: 14, marginBottom: isBeforeLaunch ? 24 : 40 }}>Alta's March 2026 Prediction Market</div>
+        {isBeforeLaunch && (
+          <div style={{
+            background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.3)",
+            borderRadius: 12, padding: "12px 20px", marginBottom: 24,
+          }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#818cf8", letterSpacing: 1, marginBottom: 4 }}>🕗 MARKETS OPEN TONIGHT AT 8:00 PM</div>
+            <div style={{ fontSize: 12, color: "#94a3b8" }}>Register now to secure your spot!</div>
+          </div>
+        )}
+        <div style={{ background: isBeforeLaunch ? "rgba(255,255,255,0.08)" : "#fff", border: `1px solid ${isBeforeLaunch ? "rgba(255,255,255,0.15)" : "#e2e8f0"}`, borderRadius: 20, padding: 32, boxShadow: isBeforeLaunch ? "0 4px 24px rgba(0,0,0,0.3)" : "0 4px 24px rgba(0,0,0,0.06)" }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: isBeforeLaunch ? "#94a3b8" : "#64748b", letterSpacing: 0.8, marginBottom: 8, textAlign: "left" }}>YOUR ALTA EMAIL</div>
               <input
                 ref={emailInputRef}
                 value={emailInput}
@@ -1050,26 +1078,28 @@ export default function Poplymarket() {
                 type="email"
                 style={{
                   width: "100%", padding: "13px 16px", borderRadius: 12,
-                  border: "1.5px solid #e2e8f0", fontSize: 15, fontFamily: "inherit",
-                  outline: "none", boxSizing: "border-box", marginBottom: 16, color: "#0f172a", background: "#f8fafc",
+                  border: `1.5px solid ${isBeforeLaunch ? "rgba(255,255,255,0.2)" : "#e2e8f0"}`, fontSize: 15, fontFamily: "inherit",
+                  outline: "none", boxSizing: "border-box", marginBottom: 16,
+                  color: isBeforeLaunch ? "#fff" : "#0f172a",
+                  background: isBeforeLaunch ? "rgba(255,255,255,0.08)" : "#f8fafc",
                 }}
                 onFocus={e => e.target.style.borderColor = "#6366f1"}
-                onBlur={e => e.target.style.borderColor = "#e2e8f0"}
+                onBlur={e => e.target.style.borderColor = isBeforeLaunch ? "rgba(255,255,255,0.2)" : "#e2e8f0"}
               />
               <button onClick={handleJoin} disabled={joinLoading} style={{
                 width: "100%", padding: "14px", borderRadius: 12, border: "none",
                 background: joinLoading ? "#94a3b8" : "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "#fff",
                 fontSize: 15, fontWeight: 700, cursor: joinLoading ? "wait" : "pointer", fontFamily: "inherit",
-              }}>{joinLoading ? "Joining..." : "Enter the Market →"}</button>
+              }}>{joinLoading ? "Joining..." : isBeforeLaunch ? "Register & Secure Your Spot →" : "Enter the Market →"}</button>
           <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 14 }}>
-            Alta employees only · <strong style={{ color: "#6366f1" }}>1,000 ◈</strong> starting tokens · Shares go up when others agree with you
+            Alta employees only · <strong style={{ color: isBeforeLaunch ? "#818cf8" : "#6366f1" }}>1,000 ◈</strong> starting tokens
           </div>
         </div>
         <div style={{ display: "flex", justifyContent: "center", gap: 24, marginTop: 24 }}>
           {[["🏦", `${MARKETS.length}`, "Markets"], ["👥", `${users.length}`, "Players"], ["◈", `${totalStaked.toLocaleString()}`, "Staked"]].map(([icon, val, label]) => (
             <div key={label} style={{ textAlign: "center" }}>
               <div style={{ fontSize: 11, color: "#94a3b8" }}>{icon}</div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: "#0f172a" }}>{val}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: isBeforeLaunch ? "#fff" : "#0f172a" }}>{val}</div>
               <div style={{ fontSize: 10, color: "#94a3b8" }}>{label}</div>
             </div>
           ))}
@@ -1077,6 +1107,9 @@ export default function Poplymarket() {
       </div>
     </div>
   );
+
+  // Show countdown if before launch (admins bypass to full app)
+  if (isBeforeLaunch && !isAdmin) return <CountdownScreen users={users} currentUser={currentUser} />;
 
   // ── MAIN APP ──
   const tabs = [["markets", "📊 Markets"], ["leaderboard", "🏆 Leaderboard"], ["my bets", "🎲 My Bets"]];
