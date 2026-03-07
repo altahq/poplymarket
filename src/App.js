@@ -1125,7 +1125,7 @@ export default function Poplymarket() {
             background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.3)",
             borderRadius: 12, padding: "12px 20px", marginBottom: 24,
           }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "#818cf8", letterSpacing: 1, marginBottom: 4 }}>🕗 MARKETS OPEN TONIGHT AT {getLocalLaunchTime().toUpperCase()}</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#818cf8", letterSpacing: 1, marginBottom: 4 }}>🕗 MARKETS OPENING SOON</div>
             <div style={{ fontSize: 12, color: "#94a3b8" }}>Register now to secure your spot!</div>
           </div>
         )}
