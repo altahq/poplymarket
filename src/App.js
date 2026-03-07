@@ -8,19 +8,29 @@ fontLink.href =
   "https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap";
 document.head.appendChild(fontLink);
 
-// ─── ADMIN LIST (add your name exactly as you login) ────────────────────────────
+// ─── CONFIG ─────────────────────────────────────────────────────────────────────
 const ADMINS = ["Stav Levi", "Stav", "Tom Hoffen"];
-
-// ─── CONSTANTS ──────────────────────────────────────────────────────────────────
 const SEED = 100;
 const INITIAL_TOKENS = 1000;
+const ALLOWED_DOMAIN = "altahq.com";
 
-const BET_DATES = [
-  { id: "mar20", label: "By March 20", short: "Mar 20", multiplier: 3.0, color: "#16a34a", bg: "#f0fdf4", border: "#bbf7d0", tag: "3× if YES" },
-  { id: "mar25", label: "By March 25", short: "Mar 25", multiplier: 2.0, color: "#2563eb", bg: "#eff6ff", border: "#bfdbfe", tag: "2× if YES" },
-  { id: "mar31", label: "By March 31", short: "Mar 31", multiplier: 1.5, color: "#7c3aed", bg: "#f5f3ff", border: "#ddd6fe", tag: "1.5× if YES" },
-];
+function extractName(email) {
+  const local = email.split("@")[0];
+  return local
+    .split(/[._-]/)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
 
+function isValidEmail(email) {
+  return (
+    email &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) &&
+    email.trim().toLowerCase().endsWith(`@${ALLOWED_DOMAIN}`)
+  );
+}
+
+// ─── MARKETS ────────────────────────────────────────────────────────────────────
 const MARKETS = [
   // Sales + Strategic
   { id: "s1", dept: "Sales", emoji: "💰", label: "$800K Closed Amount", description: "$800K total closed — EMEA +$250K, US +$450K" },
@@ -39,7 +49,7 @@ const MARKETS = [
   { id: "c1", dept: "CX", emoji: "🛡️", label: "Less Than 7 Churns", description: "Churn stays below 7 customers in March" },
   { id: "c2", dept: "CX", emoji: "⚡", label: "<20 Min Response Time", description: "Median response time under 20 minutes" },
   { id: "c3", dept: "CX", emoji: "👥", label: "Hire & Ramp 2 Reps", description: "Hiring and ramping 2 CX reps" },
-  { id: "c4", dept: "CX", emoji: "🎓", label: "Katie Academy Launched", description: "\"Katie Academy\" — CS onboarding project goes live" },
+  { id: "c4", dept: "CX", emoji: "🎓", label: "Katie Academy Launched", description: '"Katie Academy" — CS onboarding project goes live' },
   { id: "c5", dept: "CX", emoji: "🎤", label: "CX Webinar", description: "CX Webinar hosted and delivered" },
   // Operations & Bizops
   { id: "o1", dept: "Operations", emoji: "👥", label: "Key Hires Done", description: "Hiring: People Ops, CS US & IL, Sales IL" },
@@ -89,32 +99,34 @@ const DEPT_META = {
 };
 const DEPT_ORDER = ["Sales", "Marketing", "CX", "Operations", "Builders", "AI Engineers", "Design", "Partnership"];
 
-// ─── STATS HELPERS ──────────────────────────────────────────────────────────────
+// ─── AMM PRICING ENGINE ─────────────────────────────────────────────────────────
+function getPrice(bets, marketId, direction) {
+  const active = bets.filter(b => b.market_id === marketId && b.status !== "sold");
+  const yesAmt = SEED + active.filter(b => b.direction === "YES").reduce((s, b) => s + b.amount, 0);
+  const noAmt  = SEED + active.filter(b => b.direction === "NO").reduce((s, b) => s + b.amount, 0);
+  const total = yesAmt + noAmt;
+  return direction === "YES" ? yesAmt / total : noAmt / total;
+}
+
 function getProb(bets, marketId) {
-  const mb = bets.filter(b => b.market_id === marketId);
-  const yes = SEED + mb.filter(b => b.direction === "YES").reduce((s, b) => s + b.amount, 0);
-  const no  = SEED + mb.filter(b => b.direction === "NO").reduce((s, b) => s + b.amount, 0);
-  return Math.round((yes / (yes + no)) * 100);
+  return Math.round(getPrice(bets, marketId, "YES") * 100);
 }
 
 function getMarketStats(bets, marketId) {
-  const mb = bets.filter(b => b.market_id === marketId);
-  const traders = new Set(mb.map(b => b.user_name)).size;
-  const totalVol = mb.reduce((s, b) => s + b.amount, 0);
-  const yesBets = mb.filter(b => b.direction === "YES");
-  const yesVol = yesBets.reduce((s, b) => s + b.amount, 0);
-  const topPct = yesVol > 0 ? Math.round(Math.max(...yesBets.map(b => b.amount), 0) / yesVol * 100) : null;
-  const timestamps = mb.map(b => new Date(b.created_at).getTime()).filter(Boolean);
+  const active = bets.filter(b => b.market_id === marketId && b.status !== "sold");
+  const traders = new Set(active.map(b => b.user_name)).size;
+  const totalVol = active.reduce((s, b) => s + b.amount, 0);
+  const timestamps = active.map(b => new Date(b.created_at).getTime()).filter(Boolean);
   const lastTs = timestamps.length ? Math.max(...timestamps) : null;
   let state;
   if (traders === 0) state = "no_liquidity";
   else if (traders < 3 || totalVol < 100) state = "low_liquidity";
   else state = "healthy";
-  const sorted = [...mb].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  const sorted = [...active].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
   let yA = SEED, nA = SEED;
   const hist = [50];
   sorted.forEach(b => { if (b.direction === "YES") yA += b.amount; else nA += b.amount; hist.push(Math.round(yA / (yA + nA) * 100)); });
-  return { traders, totalVol, topPct, lastTs, state, hist };
+  return { traders, totalVol, lastTs, state, hist };
 }
 
 function formatAgo(ts) {
@@ -126,13 +138,16 @@ function formatAgo(ts) {
   return `${dy}d ago`;
 }
 
-function getUserStats(bets, users, userName) {
-  const ub = bets.filter(b => b.user_name === userName);
-  const staked = ub.reduce((s, b) => s + b.amount, 0);
-  const user = users.find(u => u.name === userName);
-  const byDept = {};
-  ub.forEach(b => { const m = MARKETS.find(x => x.id === b.market_id); if (m) byDept[m.dept] = (byDept[m.dept] || 0) + b.amount; });
-  return { staked, remaining: user?.tokens ?? 0, betCount: ub.length, byDept };
+function getMyPosition(bets, marketId, userName) {
+  const my = bets.filter(b => b.user_name === userName && b.market_id === marketId && b.status !== "sold");
+  if (my.length === 0) return null;
+  const yesBets = my.filter(b => b.direction === "YES");
+  const noBets  = my.filter(b => b.direction === "NO");
+  const yesShares = yesBets.reduce((s, b) => s + (b.shares || 0), 0);
+  const noShares  = noBets.reduce((s, b) => s + (b.shares || 0), 0);
+  const yesCost   = yesBets.reduce((s, b) => s + b.amount, 0);
+  const noCost    = noBets.reduce((s, b) => s + b.amount, 0);
+  return { yesBets, noBets, yesShares, noShares, yesCost, noCost, totalCost: yesCost + noCost, totalBets: my.length };
 }
 
 // ─── CONFETTI ───────────────────────────────────────────────────────────────────
@@ -203,31 +218,52 @@ function StatsLine({ stats, prob }) {
 }
 
 // ─── MARKET CARD ────────────────────────────────────────────────────────────────
-function MarketCard({ market, bets, currentUser, onBet, resolution }) {
+function MarketCard({ market, bets, currentUser, onBet, onSell, resolution }) {
   const prob = getProb(bets, market.id);
   const stats = getMarketStats(bets, market.id);
-  const myBet = bets.find(b => b.user_name === currentUser?.name && b.market_id === market.id);
+  const pos = currentUser ? getMyPosition(bets, market.id, currentUser.name) : null;
   const meta = DEPT_META[market.dept];
-  const dateInfo = myBet?.bet_date ? BET_DATES.find(d => d.id === myBet.bet_date) : null;
   const isResolved = !!resolution;
-  const won = isResolved && myBet && myBet.direction === resolution.outcome;
-  const lost = isResolved && myBet && myBet.direction !== resolution.outcome;
+
+  // Calculate position P&L
+  let posDisplay = null;
+  if (pos) {
+    const yesPrice = getPrice(bets, market.id, "YES");
+    const noPrice  = getPrice(bets, market.id, "NO");
+    const yesValue = Math.round(pos.yesShares * yesPrice);
+    const noValue  = Math.round(pos.noShares * noPrice);
+    const totalValue = yesValue + noValue;
+    const pnl = totalValue - pos.totalCost;
+    const pnlPct = pos.totalCost > 0 ? Math.round(pnl / pos.totalCost * 100) : 0;
+    const dominantDir = pos.yesShares >= pos.noShares ? "YES" : "NO";
+    const dominantShares = dominantDir === "YES" ? pos.yesShares : pos.noShares;
+    posDisplay = { dominantDir, dominantShares, totalValue, pnl, pnlPct, totalCost: pos.totalCost };
+  }
+
+  // Resolution payout calculation
+  let resPayout = null;
+  if (isResolved && pos) {
+    const active = bets.filter(b => b.market_id === market.id && b.status !== "sold");
+    const totalPool = active.reduce((s, b) => s + b.amount, 0);
+    const winnerShares = active.filter(b => b.direction === resolution.outcome).reduce((s, b) => s + (b.shares || 0), 0);
+    const payoutPerShare = winnerShares > 0 ? totalPool / winnerShares : 0;
+    const myWinShares = pos[resolution.outcome === "YES" ? "yesShares" : "noShares"];
+    resPayout = myWinShares > 0 ? Math.round(myWinShares * payoutPerShare) : 0;
+  }
 
   return (
     <div
-      onClick={() => !myBet && !isResolved && onBet(market)}
+      onClick={() => !isResolved && onBet(market)}
       style={{
-        background: isResolved
-          ? resolution.outcome === "YES" ? "#f0fdf4" : "#fef2f2"
-          : "#fff",
+        background: isResolved ? (resolution.outcome === "YES" ? "#f0fdf4" : "#fef2f2") : "#fff",
         border: `1px solid ${isResolved ? (resolution.outcome === "YES" ? "#bbf7d0" : "#fecaca") : "#e2e8f0"}`,
         borderRadius: 14, padding: "18px 20px",
-        cursor: myBet || isResolved ? "default" : "pointer",
+        cursor: isResolved ? "default" : "pointer",
         transition: "box-shadow 0.15s, border-color 0.15s",
         display: "flex", flexDirection: "column", gap: 12,
         opacity: isResolved ? 0.9 : 1,
       }}
-      onMouseEnter={e => { if (!myBet && !isResolved) { e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.08)"; e.currentTarget.style.borderColor = "#c7d2fe"; } }}
+      onMouseEnter={e => { if (!isResolved) { e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.08)"; e.currentTarget.style.borderColor = "#c7d2fe"; } }}
       onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.borderColor = isResolved ? (resolution.outcome === "YES" ? "#bbf7d0" : "#fecaca") : "#e2e8f0"; }}
     >
       {/* Resolved banner */}
@@ -237,7 +273,8 @@ function MarketCard({ market, bets, currentUser, onBet, resolution }) {
           color: "#fff", fontSize: 11, fontWeight: 700, padding: "4px 12px",
           borderRadius: 8, textAlign: "center", letterSpacing: 0.5,
         }}>
-          RESOLVED: {resolution.outcome} {won ? "— YOU WON! 🎉" : lost ? "— Better luck next time" : ""}
+          RESOLVED: {resolution.outcome}
+          {resPayout > 0 ? ` — YOU WON ${resPayout} ◈! 🎉` : pos ? " — Better luck next time" : ""}
         </div>
       )}
       {/* Header row */}
@@ -253,19 +290,32 @@ function MarketCard({ market, bets, currentUser, onBet, resolution }) {
           <span style={{ fontSize: 10, fontWeight: 600, color: meta.color, background: meta.bg, padding: "2px 8px", borderRadius: 20, letterSpacing: 0.5, whiteSpace: "nowrap" }}>
             {market.dept.toUpperCase()}
           </span>
-          {myBet && (
-            <span style={{
-              fontSize: 10, fontWeight: 600,
-              color: myBet.direction === "YES" ? "#16a34a" : "#dc2626",
-              background: myBet.direction === "YES" ? "#f0fdf4" : "#fef2f2",
-              border: `1px solid ${myBet.direction === "YES" ? "#bbf7d0" : "#fecaca"}`,
-              padding: "2px 8px", borderRadius: 20, whiteSpace: "nowrap",
-            }}>
-              YOUR BET: {myBet.direction} {dateInfo ? `(${dateInfo.short})` : ""} · {myBet.amount} ◈
-            </span>
-          )}
         </div>
       </div>
+      {/* Position badge */}
+      {posDisplay && !isResolved && (
+        <div style={{
+          background: posDisplay.pnl >= 0 ? "#f0fdf4" : "#fef2f2",
+          border: `1px solid ${posDisplay.pnl >= 0 ? "#bbf7d0" : "#fecaca"}`,
+          borderRadius: 10, padding: "8px 12px",
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <div>
+            <span style={{ fontSize: 11, fontWeight: 600, color: "#475569" }}>YOUR POSITION </span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: posDisplay.dominantDir === "YES" ? "#16a34a" : "#dc2626" }}>
+              {Math.round(posDisplay.dominantShares)} {posDisplay.dominantDir} shares
+            </span>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: posDisplay.pnl >= 0 ? "#16a34a" : "#dc2626" }}>
+              {posDisplay.pnl >= 0 ? "+" : ""}{posDisplay.pnl} ◈
+            </span>
+            <span style={{ fontSize: 10, color: "#94a3b8", marginLeft: 4 }}>
+              ({posDisplay.pnlPct >= 0 ? "+" : ""}{posDisplay.pnlPct}%)
+            </span>
+          </div>
+        </div>
+      )}
       {/* Probability bar */}
       <div>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
@@ -282,24 +332,26 @@ function MarketCard({ market, bets, currentUser, onBet, resolution }) {
       </div>
       {/* Stats line */}
       <StatsLine stats={stats} prob={prob} />
-      {/* CTA */}
-      {!myBet && !isResolved && (
+      {/* CTA buttons */}
+      {!isResolved && (
         <div style={{ display: "flex", gap: 8, marginTop: 2 }}>
-          <button style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: "1px solid #bbf7d0", background: "#f0fdf4", color: "#16a34a", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>YES ↑</button>
-          <button style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: "1px solid #fecaca", background: "#fef2f2", color: "#dc2626", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>NO ↓</button>
+          <button onClick={e => { e.stopPropagation(); onBet(market, "YES"); }} style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: "1px solid #bbf7d0", background: "#f0fdf4", color: "#16a34a", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+            Buy YES ↑
+          </button>
+          <button onClick={e => { e.stopPropagation(); onBet(market, "NO"); }} style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: "1px solid #fecaca", background: "#fef2f2", color: "#dc2626", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+            Buy NO ↓
+          </button>
         </div>
       )}
     </div>
   );
 }
 
-// ─── BET MODAL ──────────────────────────────────────────────────────────────────
-function BetModal({ market, currentUser, bets, onConfirm, onClose }) {
-  const [dir, setDir] = useState("YES");
-  const [betDate, setBetDate] = useState("mar31");
+// ─── BET MODAL (AMM) ────────────────────────────────────────────────────────────
+function BetModal({ market, initialDir, currentUser, bets, onConfirm, onClose }) {
+  const [dir, setDir] = useState(initialDir || "YES");
   const [amount, setAmount] = useState(50);
   const [submitting, setSubmitting] = useState(false);
-  const inputRef = useRef(null);
 
   useEffect(() => {
     const handler = (e) => { if (e.key === "Escape") onClose(); };
@@ -307,11 +359,16 @@ function BetModal({ market, currentUser, bets, onConfirm, onClose }) {
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
+  const price = getPrice(bets, market.id, dir);
+  const shares = amount / price;
   const prob = getProb(bets, market.id);
-  const selectedDate = BET_DATES.find(d => d.id === betDate);
-  const multiplier = dir === "YES" ? selectedDate?.multiplier : 1.5;
-  const potentialWin = Math.round(amount * multiplier);
   const isValid = amount > 0 && amount <= currentUser.tokens;
+
+  // Simulate price after your bet
+  const simActive = bets.filter(b => b.market_id === market.id && b.status !== "sold");
+  const simYes = SEED + simActive.filter(b => b.direction === "YES").reduce((s, b) => s + b.amount, 0) + (dir === "YES" ? amount : 0);
+  const simNo  = SEED + simActive.filter(b => b.direction === "NO").reduce((s, b) => s + b.amount, 0) + (dir === "NO" ? amount : 0);
+  const newProb = Math.round(simYes / (simYes + simNo) * 100);
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 20 }} onClick={onClose}>
@@ -324,15 +381,15 @@ function BetModal({ market, currentUser, bets, onConfirm, onClose }) {
             <div style={{ fontSize: 11, color: "#94a3b8" }}>{market.description}</div>
           </div>
         </div>
-        {/* Odds display */}
+        {/* Current odds */}
         <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
           <div style={{ flex: 1, background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "10px 12px", textAlign: "center" }}>
             <div style={{ fontSize: 20, fontWeight: 700, color: "#16a34a" }}>{prob}%</div>
-            <div style={{ fontSize: 10, color: "#4ade80", marginTop: 1 }}>YES (crowd)</div>
+            <div style={{ fontSize: 10, color: "#4ade80", marginTop: 1 }}>YES price</div>
           </div>
           <div style={{ flex: 1, background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "10px 12px", textAlign: "center" }}>
             <div style={{ fontSize: 20, fontWeight: 700, color: "#dc2626" }}>{100 - prob}%</div>
-            <div style={{ fontSize: 10, color: "#f87171", marginTop: 1 }}>NO (crowd)</div>
+            <div style={{ fontSize: 10, color: "#f87171", marginTop: 1 }}>NO price</div>
           </div>
         </div>
         {/* Direction */}
@@ -350,31 +407,6 @@ function BetModal({ market, currentUser, bets, onConfirm, onClose }) {
             ))}
           </div>
         </div>
-        {/* Date picker (YES only) */}
-        {dir === "YES" && (
-          <div style={{ marginBottom: 18 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: "#64748b", letterSpacing: 0.8, marginBottom: 8 }}>WHEN? (earlier = higher reward)</div>
-            <div style={{ display: "flex", gap: 6 }}>
-              {BET_DATES.map(d => (
-                <button key={d.id} onClick={() => setBetDate(d.id)} style={{
-                  flex: 1, padding: "10px 6px", borderRadius: 10,
-                  border: `2px solid ${betDate === d.id ? d.color : "#e2e8f0"}`,
-                  background: betDate === d.id ? d.bg : "#fff",
-                  cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s",
-                }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: betDate === d.id ? d.color : "#64748b" }}>{d.short}</div>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: betDate === d.id ? d.color : "#94a3b8", marginTop: 2 }}>{d.tag}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        {dir === "NO" && (
-          <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "10px 14px", marginBottom: 18, display: "flex", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 12, color: "#64748b" }}>NO = goal not hit by Mar 31</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: "#dc2626" }}>1.5× payout</span>
-          </div>
-        )}
         {/* Amount */}
         <div style={{ marginBottom: 20 }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
@@ -382,7 +414,6 @@ function BetModal({ market, currentUser, bets, onConfirm, onClose }) {
             <div style={{ fontSize: 11, color: "#94a3b8" }}>Balance: {currentUser.tokens.toLocaleString()} ◈</div>
           </div>
           <input
-            ref={inputRef}
             type="number"
             value={amount}
             onChange={e => setAmount(Math.max(0, Math.min(parseInt(e.target.value) || 0, currentUser.tokens)))}
@@ -415,10 +446,20 @@ function BetModal({ market, currentUser, bets, onConfirm, onClose }) {
             }}>MAX</button>
           </div>
         </div>
-        {/* Potential win */}
-        <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "10px 16px", marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: 12, color: "#64748b" }}>If correct you win</span>
-          <span style={{ fontSize: 16, fontWeight: 700, color: "#16a34a" }}>+{potentialWin} ◈ <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 400 }}>({multiplier}×)</span></span>
+        {/* Trade summary */}
+        <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 16px", marginBottom: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+            <span style={{ fontSize: 12, color: "#64748b" }}>You buy</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>{Math.round(shares)} {dir} shares @ {Math.round(price * 100)}%</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+            <span style={{ fontSize: 12, color: "#64748b" }}>Price after trade</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "#6366f1" }}>YES {newProb}% / NO {100 - newProb}%</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 12, color: "#64748b" }}>If {dir} wins, shares worth</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#16a34a" }}>up to {Math.round(shares)} ◈ ({amount > 0 ? `${Math.round((shares / amount - 1) * 100)}% profit` : ""})</span>
+          </div>
         </div>
         {/* Actions */}
         <div style={{ display: "flex", gap: 10 }}>
@@ -429,7 +470,7 @@ function BetModal({ market, currentUser, bets, onConfirm, onClose }) {
             onClick={async () => {
               if (!isValid || submitting) return;
               setSubmitting(true);
-              await onConfirm({ dir, betDate: dir === "YES" ? betDate : null, multiplier, amount });
+              await onConfirm({ dir, amount, shares, entryPrice: price });
               setSubmitting(false);
             }}
             style={{
@@ -439,7 +480,80 @@ function BetModal({ market, currentUser, bets, onConfirm, onClose }) {
               background: dir === "YES" ? "#16a34a" : "#dc2626", color: "#fff",
             }}
           >
-            {submitting ? "Placing..." : `Bet ${amount} ◈ on ${dir} ${dir === "YES" && selectedDate ? `(${selectedDate.short})` : ""} →`}
+            {submitting ? "Buying..." : `Buy ${Math.round(shares)} ${dir} shares for ${amount} ◈`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── SELL MODAL ─────────────────────────────────────────────────────────────────
+function SellModal({ bet, bets, onConfirm, onClose }) {
+  const [submitting, setSubmitting] = useState(false);
+  const market = MARKETS.find(m => m.id === bet.market_id);
+  if (!market) return null;
+
+  const currentPrice = getPrice(bets, bet.market_id, bet.direction);
+  const payout = Math.round((bet.shares || 0) * currentPrice);
+  const pnl = payout - bet.amount;
+  const pnlPct = bet.amount > 0 ? Math.round(pnl / bet.amount * 100) : 0;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 20 }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: 20, padding: 28, maxWidth: 400, width: "100%", boxShadow: "0 24px 48px rgba(0,0,0,0.15)" }} onClick={e => e.stopPropagation()}>
+        <div style={{ textAlign: "center", marginBottom: 20 }}>
+          <div style={{ fontSize: 36 }}>💸</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#0f172a", marginTop: 8 }}>Sell Position</div>
+          <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>{market.emoji} {market.label}</div>
+        </div>
+        <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ fontSize: 12, color: "#64748b" }}>Shares</span>
+            <span style={{ fontSize: 12, fontWeight: 700 }}>{Math.round(bet.shares || 0)} {bet.direction}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ fontSize: 12, color: "#64748b" }}>Entry price</span>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>{Math.round((bet.entry_price || 0.5) * 100)}%</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ fontSize: 12, color: "#64748b" }}>Current price</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "#6366f1" }}>{Math.round(currentPrice * 100)}%</span>
+          </div>
+          <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 8, marginTop: 4 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+              <span style={{ fontSize: 12, color: "#64748b" }}>You paid</span>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>{bet.amount} ◈</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+              <span style={{ fontSize: 12, color: "#64748b" }}>You receive</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{payout} ◈</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 12, color: "#64748b" }}>P&L</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: pnl >= 0 ? "#16a34a" : "#dc2626" }}>
+                {pnl >= 0 ? "+" : ""}{pnl} ◈ ({pnlPct >= 0 ? "+" : ""}{pnlPct}%)
+              </span>
+            </div>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: "13px", borderRadius: 10, border: "1.5px solid #e2e8f0", background: "#fff", color: "#64748b", fontWeight: 600, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>Keep</button>
+          <button
+            disabled={submitting}
+            onClick={async () => {
+              setSubmitting(true);
+              await onConfirm(bet, payout);
+              setSubmitting(false);
+            }}
+            style={{
+              flex: 2, padding: "13px", borderRadius: 10, border: "none",
+              background: pnl >= 0 ? "#16a34a" : "#dc2626", color: "#fff",
+              fontWeight: 700, fontSize: 14, cursor: submitting ? "not-allowed" : "pointer",
+              fontFamily: "inherit", opacity: submitting ? 0.5 : 1,
+            }}
+          >
+            {submitting ? "Selling..." : `Sell for ${payout} ◈`}
           </button>
         </div>
       </div>
@@ -448,7 +562,7 @@ function BetModal({ market, currentUser, bets, onConfirm, onClose }) {
 }
 
 // ─── ADMIN PANEL ────────────────────────────────────────────────────────────────
-function AdminPanel({ resolutions, onResolve }) {
+function AdminPanel({ bets, resolutions, onResolve }) {
   const [resolving, setResolving] = useState(null);
 
   return (
@@ -456,11 +570,14 @@ function AdminPanel({ resolutions, onResolve }) {
       <div style={{ textAlign: "center", marginBottom: 28 }}>
         <div style={{ fontSize: 40 }}>⚙️</div>
         <div style={{ fontSize: 22, fontWeight: 800, color: "#0f172a", marginTop: 6 }}>Admin Panel</div>
-        <div style={{ color: "#64748b", fontSize: 13, marginTop: 4 }}>Resolve markets to pay out winners</div>
+        <div style={{ color: "#64748b", fontSize: 13, marginTop: 4 }}>Resolve markets — winners split the total pool by shares</div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 10 }}>
         {MARKETS.map(m => {
           const res = resolutions.find(r => r.market_id === m.id);
+          const active = bets.filter(b => b.market_id === m.id && b.status !== "sold");
+          const pool = active.reduce((s, b) => s + b.amount, 0);
+          const prob = getProb(bets, m.id);
           return (
             <div key={m.id} style={{
               background: res ? (res.outcome === "YES" ? "#f0fdf4" : "#fef2f2") : "#fff",
@@ -469,9 +586,9 @@ function AdminPanel({ resolutions, onResolve }) {
             }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                 <span style={{ fontSize: 18 }}>{m.emoji}</span>
-                <div>
+                <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: "#0f172a" }}>{m.label}</div>
-                  <div style={{ fontSize: 10, color: "#94a3b8" }}>{m.dept}</div>
+                  <div style={{ fontSize: 10, color: "#94a3b8" }}>{m.dept} · Pool: {pool} ◈ · YES {prob}%</div>
                 </div>
               </div>
               {res ? (
@@ -515,13 +632,15 @@ export default function Poplymarket() {
   const [bets, setBets] = useState([]);
   const [resolutions, setResolutions] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
-  const [nameInput, setNameInput] = useState("");
+  const [emailInput, setEmailInput] = useState("");
   const [betMarket, setBetMarket] = useState(null);
+  const [betInitialDir, setBetInitialDir] = useState("YES");
+  const [sellBet, setSellBet] = useState(null);
   const [tab, setTab] = useState("markets");
   const [filterDept, setFilterDept] = useState("All");
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
-  const nameInputRef = useRef(null);
+  const emailInputRef = useRef(null);
 
   const showToast = useCallback((msg, type = "success") => {
     setToast({ msg, type });
@@ -540,8 +659,8 @@ export default function Poplymarket() {
       if (betsRes.data) setBets(betsRes.data);
       if (resRes.data) setResolutions(resRes.data);
 
-      // Restore session from localStorage
-      const saved = localStorage.getItem("pm2-user");
+      // Restore session
+      const saved = localStorage.getItem("pm3-user");
       if (saved && usersRes.data) {
         const found = usersRes.data.find(u => u.name === saved);
         if (found) setCurrentUser(found);
@@ -557,17 +676,12 @@ export default function Poplymarket() {
   // ── REALTIME SUBSCRIPTIONS ──
   useEffect(() => {
     const channel = supabase
-      .channel("poplymarket-realtime")
+      .channel("poplymarket-v3")
       .on("postgres_changes", { event: "*", schema: "public", table: "bets" }, (payload) => {
         if (payload.eventType === "INSERT") {
           setBets(prev => [...prev, payload.new]);
-          // Update the user's token balance in our local state
-          setUsers(prev => prev.map(u => {
-            if (u.name === payload.new.user_name) {
-              return { ...u, tokens: u.tokens - payload.new.amount };
-            }
-            return u;
-          }));
+        } else if (payload.eventType === "UPDATE") {
+          setBets(prev => prev.map(b => b.id === payload.new.id ? payload.new : b));
         }
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "market_resolutions" }, (payload) => {
@@ -575,40 +689,57 @@ export default function Poplymarket() {
           setResolutions(prev => [...prev, payload.new]);
         }
       })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "users" }, (payload) => {
-        setUsers(prev => {
-          if (prev.find(u => u.name === payload.new.name)) return prev;
-          return [...prev, payload.new];
-        });
+      .on("postgres_changes", { event: "*", schema: "public", table: "users" }, (payload) => {
+        if (payload.eventType === "INSERT") {
+          setUsers(prev => prev.find(u => u.name === payload.new.name) ? prev : [...prev, payload.new]);
+        } else if (payload.eventType === "UPDATE") {
+          setUsers(prev => prev.map(u => u.name === payload.new.name ? payload.new : u));
+          // Keep currentUser in sync
+          setCurrentUser(cu => cu && cu.name === payload.new.name ? payload.new : cu);
+        }
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // ── Auto-focus name input on login page ──
   useEffect(() => {
-    if (!currentUser && nameInputRef.current) {
-      setTimeout(() => nameInputRef.current?.focus(), 100);
+    if (!currentUser && emailInputRef.current) {
+      setTimeout(() => emailInputRef.current?.focus(), 100);
     }
   }, [currentUser]);
 
-  // ── JOIN / LOGIN ──
+  // ── JOIN / LOGIN (email-based) ──
   const handleJoin = async () => {
-    const name = nameInput.trim();
-    if (!name) return;
-    // Case-insensitive check for existing user
-    const existing = users.find(u => u.name.toLowerCase() === name.toLowerCase());
+    const email = emailInput.trim().toLowerCase();
+    if (!isValidEmail(email)) {
+      showToast("Please enter a valid @altahq.com email", "error");
+      return;
+    }
+    const name = extractName(email);
+
+    // Check for existing user by email or name
+    let existing = users.find(u => u.email && u.email.toLowerCase() === email);
+    if (!existing) {
+      existing = users.find(u => u.name.toLowerCase() === name.toLowerCase());
+    }
+
     if (existing) {
+      // Update email if not set
+      if (!existing.email) {
+        await supabase.from("users").update({ email }).eq("name", existing.name);
+        existing = { ...existing, email };
+      }
       setCurrentUser(existing);
-      localStorage.setItem("pm2-user", existing.name);
+      localStorage.setItem("pm3-user", existing.name);
       showToast(`Welcome back, ${existing.name}! 👋`);
       return;
     }
-    // Create new user in Supabase
+
+    // Create new user
     const { data, error } = await supabase
       .from("users")
-      .insert({ name, tokens: INITIAL_TOKENS })
+      .insert({ name, email, tokens: INITIAL_TOKENS })
       .select()
       .single();
     if (error) {
@@ -617,23 +748,23 @@ export default function Poplymarket() {
     }
     setUsers(prev => [...prev, data]);
     setCurrentUser(data);
-    localStorage.setItem("pm2-user", data.name);
+    localStorage.setItem("pm3-user", data.name);
     fireConfetti();
     showToast(`Welcome, ${name}! 🎯 1,000 tokens loaded`);
   };
 
-  // ── PLACE BET ──
-  const handleBet = async ({ dir, betDate, multiplier, amount }) => {
-    // Insert bet into Supabase
+  // ── PLACE BET (AMM) ──
+  const handleBet = async ({ dir, amount, shares, entryPrice }) => {
     const { data: betData, error: betError } = await supabase
       .from("bets")
       .insert({
         user_name: currentUser.name,
         market_id: betMarket.id,
         direction: dir,
-        bet_date: betDate,
-        multiplier,
         amount,
+        shares,
+        entry_price: entryPrice,
+        status: "active",
       })
       .select()
       .single();
@@ -643,7 +774,6 @@ export default function Poplymarket() {
       return;
     }
 
-    // Update user tokens in Supabase
     const newTokens = currentUser.tokens - amount;
     const { error: userError } = await supabase
       .from("users")
@@ -651,23 +781,55 @@ export default function Poplymarket() {
       .eq("name", currentUser.name);
 
     if (userError) {
-      showToast(`Error updating balance: ${userError.message}`, "error");
+      showToast(`Error: ${userError.message}`, "error");
       return;
     }
 
-    // Optimistic local updates (realtime will also fire, but this is faster)
     const updatedUser = { ...currentUser, tokens: newTokens };
     setBets(prev => [...prev, betData]);
     setUsers(prev => prev.map(u => u.name === currentUser.name ? updatedUser : u));
     setCurrentUser(updatedUser);
     setBetMarket(null);
     fireConfetti();
-
-    const dateInfo = betDate ? BET_DATES.find(d => d.id === betDate) : null;
-    showToast(`${amount} ◈ on ${dir}${dateInfo ? ` by ${dateInfo.short}` : ""} — potential ${Math.round(amount * multiplier)} ◈ back 🎯`);
+    showToast(`Bought ${Math.round(shares)} ${dir} shares @ ${Math.round(entryPrice * 100)}% for ${amount} ◈ 🎯`);
   };
 
-  // ── RESOLVE MARKET (admin only) ──
+  // ── SELL POSITION ──
+  const handleSell = async (bet, payout) => {
+    // Mark bet as sold
+    const { error: sellError } = await supabase
+      .from("bets")
+      .update({ status: "sold" })
+      .eq("id", bet.id);
+
+    if (sellError) {
+      showToast(`Error: ${sellError.message}`, "error");
+      return;
+    }
+
+    // Credit payout to user
+    const newTokens = currentUser.tokens + payout;
+    const { error: userError } = await supabase
+      .from("users")
+      .update({ tokens: newTokens })
+      .eq("name", currentUser.name);
+
+    if (userError) {
+      showToast(`Error: ${userError.message}`, "error");
+      return;
+    }
+
+    const updatedUser = { ...currentUser, tokens: newTokens };
+    setBets(prev => prev.map(b => b.id === bet.id ? { ...b, status: "sold" } : b));
+    setUsers(prev => prev.map(u => u.name === currentUser.name ? updatedUser : u));
+    setCurrentUser(updatedUser);
+    setSellBet(null);
+
+    const pnl = payout - bet.amount;
+    showToast(`Sold for ${payout} ◈ (${pnl >= 0 ? "+" : ""}${pnl} ◈ P&L) 💸`);
+  };
+
+  // ── RESOLVE MARKET (admin) ──
   const handleResolve = async (marketId, outcome) => {
     const { data, error } = await supabase
       .from("market_resolutions")
@@ -682,44 +844,63 @@ export default function Poplymarket() {
 
     setResolutions(prev => [...prev, data]);
 
-    // Pay out winners
-    const marketBets = bets.filter(b => b.market_id === marketId);
-    const winners = marketBets.filter(b => b.direction === outcome);
+    // Pro-rata payout: winners split the total active pool by shares
+    const active = bets.filter(b => b.market_id === marketId && b.status !== "sold");
+    const totalPool = active.reduce((s, b) => s + b.amount, 0);
+    const winners = active.filter(b => b.direction === outcome);
+    const totalWinShares = winners.reduce((s, b) => s + (b.shares || 0), 0);
+    const payoutPerShare = totalWinShares > 0 ? totalPool / totalWinShares : 0;
+
     for (const bet of winners) {
-      const payout = Math.round(bet.amount * bet.multiplier);
-      await supabase
-        .from("users")
-        .update({ tokens: users.find(u => u.name === bet.user_name)?.tokens + payout })
-        .eq("name", bet.user_name);
+      const payout = Math.round((bet.shares || 0) * payoutPerShare);
+      const user = users.find(u => u.name === bet.user_name);
+      if (user && payout > 0) {
+        await supabase
+          .from("users")
+          .update({ tokens: user.tokens + payout })
+          .eq("name", user.name);
+      }
     }
 
-    // Reload to get updated balances
     await loadData();
-    showToast(`Market resolved: ${outcome}! ${winners.length} winner(s) paid out.`);
+    showToast(`Market resolved: ${outcome}! ${winners.length} winner(s) split ${totalPool} ◈ pool.`);
   };
 
   const isAdmin = currentUser && ADMINS.some(a => a.toLowerCase() === currentUser.name.toLowerCase());
   const filteredMarkets = filterDept === "All" ? MARKETS : MARKETS.filter(m => m.dept === filterDept);
-  const totalStaked = bets.reduce((s, b) => s + b.amount, 0);
+  const activeBets = bets.filter(b => b.status !== "sold");
+  const totalStaked = activeBets.reduce((s, b) => s + b.amount, 0);
 
-  // Leaderboard
+  // Leaderboard with unrealized P&L
   const leaderboard = [...users].sort((a, b) => {
-    const aStaked = bets.filter(x => x.user_name === a.name).reduce((s, x) => s + x.amount, 0);
-    const bStaked = bets.filter(x => x.user_name === b.name).reduce((s, x) => s + x.amount, 0);
-    return (b.tokens + bStaked) - (a.tokens + aStaked); // Sort by total portfolio value
-  }).map((u, i) => ({
-    ...u,
-    rank: i + 1,
-    betCount: bets.filter(b => b.user_name === u.name).length,
-    staked: bets.filter(b => b.user_name === u.name).reduce((s, b) => s + b.amount, 0),
-    badges: [
-      bets.filter(b => b.user_name === u.name).length >= 10 ? "🎯 Diversified" : null,
-      bets.filter(b => b.user_name === u.name && b.bet_date === "mar20").length > 0 ? "⚡ Risk Taker" : null,
-      bets.filter(b => b.user_name === u.name && b.direction === "NO").length > 0 ? "🐻 Bear" : null,
-    ].filter(Boolean),
-  }));
+    const aActive = activeBets.filter(x => x.user_name === a.name);
+    const aValue = aActive.reduce((s, x) => {
+      const price = getPrice(bets, x.market_id, x.direction);
+      return s + Math.round((x.shares || 0) * price);
+    }, 0);
+    const bActive = activeBets.filter(x => x.user_name === b.name);
+    const bValue = bActive.reduce((s, x) => {
+      const price = getPrice(bets, x.market_id, x.direction);
+      return s + Math.round((x.shares || 0) * price);
+    }, 0);
+    return (b.tokens + bValue) - (a.tokens + aValue);
+  }).map((u, i) => {
+    const uActive = activeBets.filter(b => b.user_name === u.name);
+    const posValue = uActive.reduce((s, x) => s + Math.round((x.shares || 0) * getPrice(bets, x.market_id, x.direction)), 0);
+    const staked = uActive.reduce((s, b) => s + b.amount, 0);
+    return {
+      ...u, rank: i + 1,
+      betCount: uActive.length, staked, posValue,
+      portfolio: u.tokens + posValue,
+    };
+  });
 
-  const userStats = currentUser ? getUserStats(bets, users, currentUser.name) : null;
+  // My bets data
+  const myActiveBets = bets.filter(b => b.user_name === currentUser?.name && b.status !== "sold");
+  const mySoldBets   = bets.filter(b => b.user_name === currentUser?.name && b.status === "sold");
+  const myPosValue = myActiveBets.reduce((s, b) => s + Math.round((b.shares || 0) * getPrice(bets, b.market_id, b.direction)), 0);
+  const myStaked = myActiveBets.reduce((s, b) => s + b.amount, 0);
+  const myUnrealizedPnL = myPosValue - myStaked;
 
   if (loading) return (
     <div style={{ background: "#f8fafc", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "DM Sans, sans-serif" }}>
@@ -731,7 +912,7 @@ export default function Poplymarket() {
     </div>
   );
 
-  // ── LOGIN ──
+  // ── LOGIN SCREEN ──
   if (!currentUser) return (
     <div style={{ background: "linear-gradient(135deg, #f8fafc 0%, #eff6ff 50%, #f5f3ff 100%)", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "DM Sans, sans-serif", padding: "20px" }}>
       <div style={{ maxWidth: 420, width: "100%", textAlign: "center" }}>
@@ -741,13 +922,14 @@ export default function Poplymarket() {
         </div>
         <div style={{ color: "#64748b", fontSize: 14, marginBottom: 40 }}>Alta's March 2026 Prediction Market</div>
         <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 20, padding: 32, boxShadow: "0 4px 24px rgba(0,0,0,0.06)" }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: "#64748b", letterSpacing: 0.8, marginBottom: 8, textAlign: "left" }}>YOUR NAME</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "#64748b", letterSpacing: 0.8, marginBottom: 8, textAlign: "left" }}>YOUR ALTA EMAIL</div>
           <input
-            ref={nameInputRef}
-            value={nameInput}
-            onChange={e => setNameInput(e.target.value)}
+            ref={emailInputRef}
+            value={emailInput}
+            onChange={e => setEmailInput(e.target.value)}
             onKeyDown={e => e.key === "Enter" && handleJoin()}
-            placeholder="Enter your full name..."
+            placeholder="yourname@altahq.com"
+            type="email"
             style={{
               width: "100%", padding: "13px 16px", borderRadius: 12,
               border: "1.5px solid #e2e8f0", fontSize: 15, fontFamily: "inherit",
@@ -762,7 +944,7 @@ export default function Poplymarket() {
             fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
           }}>Enter the Market →</button>
           <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 14 }}>
-            Every employee starts with <strong style={{ color: "#6366f1" }}>1,000 ◈ Alta tokens</strong>
+            Alta employees only · <strong style={{ color: "#6366f1" }}>1,000 ◈</strong> starting tokens · Shares go up when others agree with you
           </div>
         </div>
         <div style={{ display: "flex", justifyContent: "center", gap: 24, marginTop: 24 }}>
@@ -818,7 +1000,7 @@ export default function Poplymarket() {
           <div style={{ background: "#f1f5f9", borderRadius: 20, padding: "5px 12px", fontSize: 13, fontWeight: 500, color: "#475569" }}>
             {currentUser.name} {isAdmin && <span style={{ fontSize: 10, color: "#6366f1" }}>★</span>}
           </div>
-          <button onClick={() => { setCurrentUser(null); localStorage.removeItem("pm2-user"); }} style={{
+          <button onClick={() => { setCurrentUser(null); localStorage.removeItem("pm3-user"); }} style={{
             background: "transparent", border: "1px solid #e2e8f0", borderRadius: 8,
             padding: "5px 10px", color: "#94a3b8", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
           }}>← Out</button>
@@ -846,11 +1028,10 @@ export default function Poplymarket() {
         {/* ── MARKETS TAB ── */}
         {tab === "markets" && (
           <>
-            {/* Stats bar */}
             <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
               {[
                 { label: "Markets", val: MARKETS.length, icon: "📊" },
-                { label: "Bets placed", val: bets.length, icon: "🎯" },
+                { label: "Bets placed", val: activeBets.length, icon: "🎯" },
                 { label: "Players", val: users.length, icon: "👥" },
                 { label: "Tokens staked", val: `${totalStaked.toLocaleString()} ◈`, icon: "💰" },
               ].map(s => (
@@ -860,7 +1041,6 @@ export default function Poplymarket() {
                 </div>
               ))}
             </div>
-            {/* Dept filter */}
             <div style={{ display: "flex", gap: 6, marginBottom: 20, flexWrap: "wrap" }}>
               {["All", ...DEPT_ORDER].map(d => (
                 <button key={d} onClick={() => setFilterDept(d)} style={{
@@ -872,12 +1052,12 @@ export default function Poplymarket() {
                 }}>{d}</button>
               ))}
             </div>
-            {/* Cards grid */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(340px, 100%), 1fr))", gap: 12 }}>
               {filteredMarkets.map(m => (
                 <MarketCard
                   key={m.id} market={m} bets={bets} currentUser={currentUser}
-                  onBet={setBetMarket}
+                  onBet={(market, dir) => { setBetMarket(market); setBetInitialDir(dir || "YES"); }}
+                  onSell={setSellBet}
                   resolution={resolutions.find(r => r.market_id === m.id)}
                 />
               ))}
@@ -891,10 +1071,10 @@ export default function Poplymarket() {
             <div style={{ textAlign: "center", marginBottom: 28 }}>
               <div style={{ fontSize: 40 }}>🏆</div>
               <div style={{ fontSize: 22, fontWeight: 800, color: "#0f172a", marginTop: 6 }}>Leaderboard</div>
-              <div style={{ color: "#64748b", fontSize: 13, marginTop: 4 }}>Rankings by total portfolio value (balance + staked)</div>
+              <div style={{ color: "#64748b", fontSize: 13, marginTop: 4 }}>Rankings by portfolio value (balance + position value)</div>
             </div>
             {leaderboard.length === 0 ? (
-              <div style={{ textAlign: "center", color: "#94a3b8", padding: 40 }}>No players yet — be the first!</div>
+              <div style={{ textAlign: "center", color: "#94a3b8", padding: 40 }}>No players yet!</div>
             ) : leaderboard.map((u, i) => (
               <div key={u.name} style={{
                 background: i === 0 ? "linear-gradient(135deg, #fefce8, #f0fdf4)" : "#fff",
@@ -907,42 +1087,32 @@ export default function Poplymarket() {
                   {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : <span style={{ fontSize: 14, color: "#94a3b8", fontWeight: 600 }}>{i + 1}</span>}
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 15, fontWeight: 700, color: u.name === currentUser.name ? "#6366f1" : "#0f172a" }}>
-                      {u.name} {u.name === currentUser.name && <span style={{ fontSize: 11, color: "#6366f1" }}>(you)</span>}
-                    </span>
-                    {u.badges.map(b => <span key={b} style={{ fontSize: 10, background: "#f1f5f9", borderRadius: 20, padding: "2px 8px", color: "#475569" }}>{b}</span>)}
-                  </div>
+                  <span style={{ fontSize: 15, fontWeight: 700, color: u.name === currentUser.name ? "#6366f1" : "#0f172a" }}>
+                    {u.name} {u.name === currentUser.name && <span style={{ fontSize: 11, color: "#6366f1" }}>(you)</span>}
+                  </span>
                   <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}>
-                    {u.betCount} bets · {u.staked.toLocaleString()} ◈ staked
+                    {u.betCount} positions · {u.staked.toLocaleString()} ◈ staked
                   </div>
                 </div>
                 <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 20, fontWeight: 700, color: "#16a34a" }}>{(u.tokens + u.staked).toLocaleString()}</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: "#16a34a" }}>{u.portfolio.toLocaleString()}</div>
                   <div style={{ fontSize: 10, color: "#94a3b8" }}>◈ portfolio</div>
                 </div>
               </div>
             ))}
-            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 20, marginTop: 20, textAlign: "center" }}>
-              <div style={{ fontSize: 13, color: "#64748b", lineHeight: 1.8 }}>
-                🏁 Markets resolve end of March 2026<br />
-                Correct bets pay out their multiplier<br />
-                Best prediction accuracy wins 🎖️
-              </div>
-            </div>
           </div>
         )}
 
         {/* ── MY BETS TAB ── */}
-        {tab === "my bets" && userStats && (
+        {tab === "my bets" && (
           <div style={{ maxWidth: 700, margin: "0 auto" }}>
-            {/* Personal stats cards */}
+            {/* Portfolio summary */}
             <div style={{ display: "flex", gap: 10, marginBottom: 24, flexWrap: "wrap" }}>
               {[
                 { label: "Balance", val: `${currentUser.tokens.toLocaleString()} ◈`, color: "#16a34a" },
-                { label: "Staked", val: `${userStats.staked.toLocaleString()} ◈`, color: "#6366f1" },
-                { label: "Bets", val: userStats.betCount, color: "#0f172a" },
-                { label: "Markets left", val: MARKETS.length - userStats.betCount, color: "#f59e0b" },
+                { label: "Positions value", val: `${myPosValue.toLocaleString()} ◈`, color: "#6366f1" },
+                { label: "Unrealized P&L", val: `${myUnrealizedPnL >= 0 ? "+" : ""}${myUnrealizedPnL} ◈`, color: myUnrealizedPnL >= 0 ? "#16a34a" : "#dc2626" },
+                { label: "Active bets", val: myActiveBets.length, color: "#0f172a" },
               ].map(s => (
                 <div key={s.label} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 18px", flex: 1, minWidth: 110 }}>
                   <div style={{ fontSize: 10, color: "#94a3b8", letterSpacing: 0.5 }}>{s.label.toUpperCase()}</div>
@@ -950,82 +1120,113 @@ export default function Poplymarket() {
                 </div>
               ))}
             </div>
-            {/* Exposure by dept */}
-            {Object.keys(userStats.byDept).length > 0 && (
-              <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 20, marginBottom: 20 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", marginBottom: 14 }}>Exposure by Department</div>
-                {Object.entries(userStats.byDept).sort((a, b) => b[1] - a[1]).map(([dept, amt]) => {
-                  const meta = DEPT_META[dept];
-                  const pct = Math.round(amt / userStats.staked * 100);
+
+            {/* Active positions */}
+            {myActiveBets.length > 0 && (
+              <div style={{ marginBottom: 24 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", marginBottom: 10, letterSpacing: 0.5 }}>ACTIVE POSITIONS</div>
+                {myActiveBets.map((bet, i) => {
+                  const market = MARKETS.find(m => m.id === bet.market_id);
+                  if (!market) return null;
+                  const currentPrice = getPrice(bets, bet.market_id, bet.direction);
+                  const value = Math.round((bet.shares || 0) * currentPrice);
+                  const pnl = value - bet.amount;
+                  const pnlPct = bet.amount > 0 ? Math.round(pnl / bet.amount * 100) : 0;
+                  const res = resolutions.find(r => r.market_id === bet.market_id);
                   return (
-                    <div key={dept} style={{ marginBottom: 8 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                        <span style={{ fontSize: 12, color: meta?.color || "#64748b", fontWeight: 600 }}>{dept}</span>
-                        <span style={{ fontSize: 12, color: "#64748b" }}>{amt} ◈ ({pct}%)</span>
+                    <div key={bet.id || i} style={{
+                      background: "#fff", border: "1px solid #e2e8f0",
+                      borderRadius: 12, padding: "14px 18px", marginBottom: 8,
+                      display: "flex", alignItems: "center", gap: 14,
+                    }}>
+                      <span style={{ fontSize: 22, flexShrink: 0 }}>{market.emoji}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{market.label}</div>
+                        <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
+                          {Math.round(bet.shares || 0)} {bet.direction} shares @ {Math.round((bet.entry_price || 0.5) * 100)}% → now {Math.round(currentPrice * 100)}%
+                        </div>
                       </div>
-                      <div style={{ height: 4, background: "#f1f5f9", borderRadius: 99 }}>
-                        <div style={{ height: "100%", width: `${pct}%`, background: meta?.color || "#6366f1", borderRadius: 99 }} />
+                      <div style={{ textAlign: "right", flexShrink: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: pnl >= 0 ? "#16a34a" : "#dc2626" }}>
+                          {pnl >= 0 ? "+" : ""}{pnl} ◈ ({pnlPct >= 0 ? "+" : ""}{pnlPct}%)
+                        </div>
+                        <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
+                          {value} ◈ value
+                        </div>
                       </div>
+                      {!res && (
+                        <button
+                          onClick={() => setSellBet(bet)}
+                          style={{
+                            padding: "6px 14px", borderRadius: 8, border: "1px solid #e2e8f0",
+                            background: "#f8fafc", color: "#64748b", fontSize: 11, fontWeight: 600,
+                            cursor: "pointer", fontFamily: "inherit", flexShrink: 0,
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.background = "#fef2f2"; e.currentTarget.style.color = "#dc2626"; e.currentTarget.style.borderColor = "#fecaca"; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = "#f8fafc"; e.currentTarget.style.color = "#64748b"; e.currentTarget.style.borderColor = "#e2e8f0"; }}
+                        >SELL</button>
+                      )}
                     </div>
                   );
                 })}
               </div>
             )}
-            {/* Bet list */}
-            {bets.filter(b => b.user_name === currentUser.name).length === 0 ? (
+
+            {/* Sold positions */}
+            {mySoldBets.length > 0 && (
+              <div style={{ marginBottom: 24 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8", marginBottom: 10, letterSpacing: 0.5 }}>SOLD</div>
+                {mySoldBets.map((bet, i) => {
+                  const market = MARKETS.find(m => m.id === bet.market_id);
+                  if (!market) return null;
+                  return (
+                    <div key={bet.id || i} style={{
+                      background: "#f8fafc", border: "1px solid #e2e8f0",
+                      borderRadius: 12, padding: "14px 18px", marginBottom: 8,
+                      display: "flex", alignItems: "center", gap: 14, opacity: 0.7,
+                    }}>
+                      <span style={{ fontSize: 22, flexShrink: 0 }}>{market.emoji}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "#64748b" }}>{market.label}</div>
+                        <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
+                          {Math.round(bet.shares || 0)} {bet.direction} shares @ {Math.round((bet.entry_price || 0.5) * 100)}%
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "#94a3b8" }}>SOLD</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {myActiveBets.length === 0 && mySoldBets.length === 0 && (
               <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 48, textAlign: "center", color: "#94a3b8" }}>
                 <div style={{ fontSize: 36, marginBottom: 12 }}>🎲</div>
-                No bets yet — go to Markets to start!
+                No positions yet — go to Markets to start trading!
               </div>
-            ) : (
-              bets.filter(b => b.user_name === currentUser.name).map((bet, i) => {
-                const market = MARKETS.find(m => m.id === bet.market_id);
-                if (!market) return null;
-                const dateInfo = bet.bet_date ? BET_DATES.find(d => d.id === bet.bet_date) : null;
-                const potWin = Math.round(bet.amount * (bet.multiplier || 1.5));
-                const res = resolutions.find(r => r.market_id === bet.market_id);
-                const won = res && bet.direction === res.outcome;
-                return (
-                  <div key={bet.id || i} style={{
-                    background: res ? (won ? "#f0fdf4" : "#fef2f2") : "#fff",
-                    border: `1px solid ${res ? (won ? "#bbf7d0" : "#fecaca") : "#e2e8f0"}`,
-                    borderRadius: 12, padding: "14px 18px", marginBottom: 8,
-                    display: "flex", alignItems: "center", gap: 14,
-                  }}>
-                    <span style={{ fontSize: 22, flexShrink: 0 }}>{market.emoji}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{market.label}</div>
-                      <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
-                        {market.dept} {dateInfo ? `· ${dateInfo.short}` : ""}
-                        {res && <span style={{ fontWeight: 600, color: won ? "#16a34a" : "#dc2626" }}> · {won ? "WON ✓" : "LOST ✗"}</span>}
-                      </div>
-                    </div>
-                    <div style={{ textAlign: "right", flexShrink: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: bet.direction === "YES" ? "#16a34a" : "#dc2626" }}>
-                        {bet.direction} {bet.amount} ◈
-                      </div>
-                      <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
-                        {res ? (won ? `won ${potWin} ◈` : "lost") : `win ${potWin} ◈ (${bet.multiplier || 1.5}×)`}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
             )}
           </div>
         )}
 
         {/* ── ADMIN TAB ── */}
         {tab === "admin" && isAdmin && (
-          <AdminPanel resolutions={resolutions} onResolve={handleResolve} />
+          <AdminPanel bets={bets} resolutions={resolutions} onResolve={handleResolve} />
         )}
       </div>
 
       {/* Bet Modal */}
       {betMarket && (
         <BetModal
-          market={betMarket} currentUser={currentUser} bets={bets}
+          market={betMarket} initialDir={betInitialDir} currentUser={currentUser} bets={bets}
           onConfirm={handleBet} onClose={() => setBetMarket(null)}
+        />
+      )}
+
+      {/* Sell Modal */}
+      {sellBet && (
+        <SellModal
+          bet={sellBet} bets={bets}
+          onConfirm={handleSell} onClose={() => setSellBet(null)}
         />
       )}
     </div>
