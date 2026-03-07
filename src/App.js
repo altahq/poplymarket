@@ -18,6 +18,12 @@ const ALLOWED_DOMAIN = "altahq.com";
 // Asia/Jerusalem is UTC+2 in winter → 18:00 UTC
 const LAUNCH_TIME = new Date("2026-03-07T20:00:00+02:00").getTime();
 
+// Format launch time in the viewer's local timezone
+function getLocalLaunchTime() {
+  const d = new Date(LAUNCH_TIME);
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true });
+}
+
 function extractName(email) {
   const local = email.split("@")[0];
   return local
@@ -234,7 +240,7 @@ function CountdownScreen({ users, currentUser, onLogout }) {
           borderRadius: 16, padding: "20px 28px", marginBottom: 32,
         }}>
           <div style={{ fontSize: 13, color: "#cbd5e1", marginBottom: 4 }}>
-            🕗 Tonight at <strong style={{ color: "#fff" }}>8:00 PM</strong> Israel time
+            🕗 Tonight at <strong style={{ color: "#fff" }}>{getLocalLaunchTime()}</strong> (your time)
           </div>
           <div style={{ fontSize: 12, color: "#64748b" }}>
             {MARKETS.length} markets · 1,000 ◈ starting tokens · Bet on Alta's March goals
@@ -1063,7 +1069,7 @@ export default function Poplymarket() {
             background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.3)",
             borderRadius: 12, padding: "12px 20px", marginBottom: 24,
           }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "#818cf8", letterSpacing: 1, marginBottom: 4 }}>🕗 MARKETS OPEN TONIGHT AT 8:00 PM</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#818cf8", letterSpacing: 1, marginBottom: 4 }}>🕗 MARKETS OPEN TONIGHT AT {getLocalLaunchTime().toUpperCase()}</div>
             <div style={{ fontSize: 12, color: "#94a3b8" }}>Register now to secure your spot!</div>
           </div>
         )}
