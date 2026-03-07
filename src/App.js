@@ -110,12 +110,48 @@ const DEPT_META = {
 const DEPT_ORDER = ["Sales", "Marketing", "CX", "Operations", "Builders", "AI Engineers", "Design", "Partnership"];
 
 // ─── AMM PRICING ENGINE ─────────────────────────────────────────────────────────
-function getPrice(bets, marketId, direction) {
+function getPoolAmounts(bets, marketId) {
   const active = bets.filter(b => b.market_id === marketId && b.status !== "sold");
   const yesAmt = SEED + active.filter(b => b.direction === "YES").reduce((s, b) => s + b.amount, 0);
   const noAmt  = SEED + active.filter(b => b.direction === "NO").reduce((s, b) => s + b.amount, 0);
+  return { yesAmt, noAmt };
+}
+
+function getPrice(bets, marketId, direction) {
+  const { yesAmt, noAmt } = getPoolAmounts(bets, marketId);
   const total = yesAmt + noAmt;
   return direction === "YES" ? yesAmt / total : noAmt / total;
+}
+
+// Average execution price for buying — prevents buy-sell exploit
+function calcBuyShares(bets, marketId, direction, amount) {
+  const { yesAmt, noAmt } = getPoolAmounts(bets, marketId);
+  const preTotal = yesAmt + noAmt;
+  const prePrice = direction === "YES" ? yesAmt / preTotal : noAmt / preTotal;
+
+  const postYes = yesAmt + (direction === "YES" ? amount : 0);
+  const postNo  = noAmt  + (direction === "NO"  ? amount : 0);
+  const postTotal = postYes + postNo;
+  const postPrice = direction === "YES" ? postYes / postTotal : postNo / postTotal;
+
+  const avgPrice = (prePrice + postPrice) / 2;
+  return { shares: amount / avgPrice, avgPrice, prePrice, postPrice };
+}
+
+// Average execution price for selling — reverses price impact fairly
+function calcSellPayout(bets, bet) {
+  const { yesAmt, noAmt } = getPoolAmounts(bets, bet.market_id);
+  const preTotal = yesAmt + noAmt;
+  const prePrice = bet.direction === "YES" ? yesAmt / preTotal : noAmt / preTotal;
+
+  // After removing this bet from the pool
+  const postYes = yesAmt - (bet.direction === "YES" ? bet.amount : 0);
+  const postNo  = noAmt  - (bet.direction === "NO"  ? bet.amount : 0);
+  const postTotal = postYes + postNo;
+  const postPrice = bet.direction === "YES" ? postYes / postTotal : postNo / postTotal;
+
+  const avgPrice = (prePrice + postPrice) / 2;
+  return Math.round((bet.shares || 0) * avgPrice);
 }
 
 function getProb(bets, marketId) {
@@ -161,7 +197,7 @@ function getMyPosition(bets, marketId, userName) {
 }
 
 // ─── COUNTDOWN SCREEN (logged-in user waiting for launch) ─────────────────────
-function CountdownScreen({ users, currentUser, onLogout }) {
+function CountdownScreen({ users, currentUser, onExplore }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -219,18 +255,29 @@ function CountdownScreen({ users, currentUser, onLogout }) {
           </div>
         </div>
 
-        {/* Logged-in user badge */}
+        {/* Logged-in user badge + explore button */}
         {currentUser && (
-          <div style={{
-            background: "rgba(99,102,241,0.2)", border: "1px solid rgba(99,102,241,0.4)",
-            borderRadius: 12, padding: "12px 20px", marginBottom: 20,
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-          }}>
-            <span style={{ fontSize: 16 }}>✅</span>
-            <span style={{ color: "#c7d2fe", fontSize: 14, fontWeight: 600 }}>
-              Welcome, <span style={{ color: "#fff" }}>{currentUser.name}</span>! You're in.
-            </span>
-            <span style={{ color: "#818cf8", fontSize: 12 }}>{currentUser.tokens.toLocaleString()} ◈</span>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{
+              background: "rgba(99,102,241,0.2)", border: "1px solid rgba(99,102,241,0.4)",
+              borderRadius: 12, padding: "12px 20px", marginBottom: 12,
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+            }}>
+              <span style={{ fontSize: 16 }}>✅</span>
+              <span style={{ color: "#c7d2fe", fontSize: 14, fontWeight: 600 }}>
+                Welcome, <span style={{ color: "#fff" }}>{currentUser.name}</span>! You're in.
+              </span>
+              <span style={{ color: "#818cf8", fontSize: 12 }}>{currentUser.tokens.toLocaleString()} ◈</span>
+            </div>
+            <button onClick={onExplore} style={{
+              padding: "12px 28px", borderRadius: 12, border: "1px solid rgba(99,102,241,0.4)",
+              background: "rgba(99,102,241,0.2)", color: "#c7d2fe",
+              fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+              transition: "all 0.2s",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = "rgba(99,102,241,0.4)"; e.currentTarget.style.color = "#fff"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "rgba(99,102,241,0.2)"; e.currentTarget.style.color = "#c7d2fe"; }}
+            >👀 Explore Markets</button>
           </div>
         )}
 
@@ -475,16 +522,12 @@ function BetModal({ market, initialDir, currentUser, bets, onConfirm, onClose })
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  const price = getPrice(bets, market.id, dir);
-  const shares = amount / price;
   const prob = getProb(bets, market.id);
   const isValid = amount > 0 && amount <= currentUser.tokens;
 
-  // Simulate price after your bet
-  const simActive = bets.filter(b => b.market_id === market.id && b.status !== "sold");
-  const simYes = SEED + simActive.filter(b => b.direction === "YES").reduce((s, b) => s + b.amount, 0) + (dir === "YES" ? amount : 0);
-  const simNo  = SEED + simActive.filter(b => b.direction === "NO").reduce((s, b) => s + b.amount, 0) + (dir === "NO" ? amount : 0);
-  const newProb = Math.round(simYes / (simYes + simNo) * 100);
+  // Use average execution price (prevents buy-sell exploit)
+  const { shares, avgPrice, postPrice } = calcBuyShares(bets, market.id, dir, amount);
+  const newProb = Math.round((dir === "YES" ? postPrice : 1 - postPrice) * 100);
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 20 }} onClick={onClose}>
@@ -566,15 +609,15 @@ function BetModal({ market, initialDir, currentUser, bets, onConfirm, onClose })
         <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 16px", marginBottom: 20 }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
             <span style={{ fontSize: 12, color: "#64748b" }}>You buy</span>
-            <span style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>{Math.round(shares)} {dir} shares @ {Math.round(price * 100)}%</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>{Math.round(shares)} {dir} shares @ avg {Math.round(avgPrice * 100)}%</span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
             <span style={{ fontSize: 12, color: "#64748b" }}>Price after trade</span>
             <span style={{ fontSize: 12, fontWeight: 600, color: "#6366f1" }}>YES {newProb}% / NO {100 - newProb}%</span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 12, color: "#64748b" }}>If {dir} wins, shares worth</span>
-            <span style={{ fontSize: 12, fontWeight: 700, color: "#16a34a" }}>up to {Math.round(shares)} ◈ ({amount > 0 ? `${Math.round((shares / amount - 1) * 100)}% profit` : ""})</span>
+            <span style={{ fontSize: 12, color: "#64748b" }}>Max profit if {dir} wins</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#16a34a" }}>up to {Math.round(shares)} ◈ ({amount > 0 ? `+${Math.round((shares / amount - 1) * 100)}%` : ""})</span>
           </div>
         </div>
         {/* Actions */}
@@ -586,7 +629,7 @@ function BetModal({ market, initialDir, currentUser, bets, onConfirm, onClose })
             onClick={async () => {
               if (!isValid || submitting) return;
               setSubmitting(true);
-              await onConfirm({ dir, amount, shares, entryPrice: price });
+              await onConfirm({ dir, amount, shares, entryPrice: avgPrice });
               setSubmitting(false);
             }}
             style={{
@@ -611,7 +654,7 @@ function SellModal({ bet, bets, onConfirm, onClose }) {
   if (!market) return null;
 
   const currentPrice = getPrice(bets, bet.market_id, bet.direction);
-  const payout = Math.round((bet.shares || 0) * currentPrice);
+  const payout = calcSellPayout(bets, bet);
   const pnl = payout - bet.amount;
   const pnlPct = bet.amount > 0 ? Math.round(pnl / bet.amount * 100) : 0;
 
@@ -757,7 +800,13 @@ export default function Poplymarket() {
   const [filterDept, setFilterDept] = useState("All");
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
+  const [exploring, setExploring] = useState(false); // explore mode before launch
+  const [loginStep, setLoginStep] = useState("email"); // "email" | "otp"
+  const [otpInput, setOtpInput] = useState("");
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpCooldown, setOtpCooldown] = useState(0);
   const emailInputRef = useRef(null);
+  const otpInputRef = useRef(null);
 
   const showToast = useCallback((msg, type = "success") => {
     setToast({ msg, type });
@@ -776,10 +825,10 @@ export default function Poplymarket() {
       if (betsRes.data) setBets(betsRes.data);
       if (resRes.data) setResolutions(resRes.data);
 
-      // Restore session
-      const saved = localStorage.getItem("pm3-user");
-      if (saved && usersRes.data) {
-        const found = usersRes.data.find(u => u.name === saved);
+      // Restore session via Supabase Auth (secure — email verified)
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.email && usersRes.data) {
+        const found = usersRes.data.find(u => u.email?.toLowerCase() === session.user.email.toLowerCase());
         if (found) setCurrentUser(found);
       }
     } catch (e) {
@@ -828,19 +877,67 @@ export default function Poplymarket() {
 
 
   useEffect(() => {
-    if (!currentUser && emailInputRef.current) {
+    if (!currentUser && loginStep === "email" && emailInputRef.current) {
       setTimeout(() => emailInputRef.current?.focus(), 100);
     }
-  }, [currentUser]);
+  }, [currentUser, loginStep]);
 
-  // ── JOIN / LOGIN (simple email) ──
-  const handleJoin = async () => {
+  // OTP cooldown timer
+  useEffect(() => {
+    if (otpCooldown <= 0) return;
+    const t = setInterval(() => {
+      setOtpCooldown(c => { if (c <= 1) { clearInterval(t); return 0; } return c - 1; });
+    }, 1000);
+    return () => clearInterval(t);
+  }, [otpCooldown]);
+
+  // Focus OTP input when step changes
+  useEffect(() => {
+    if (loginStep === "otp" && otpInputRef.current) {
+      setTimeout(() => otpInputRef.current?.focus(), 100);
+    }
+  }, [loginStep]);
+
+  // ── STEP 1: SEND VERIFICATION CODE ──
+  const handleSendOtp = async () => {
     const email = emailInput.trim().toLowerCase();
     if (!isValidEmail(email)) {
       showToast("Please enter a valid @altahq.com email", "error");
       return;
     }
+    setOtpLoading(true);
+    const { error } = await supabase.auth.signInWithOtp({ email });
+    setOtpLoading(false);
+    if (error) {
+      if (error.message?.toLowerCase().includes("rate") || error.message?.toLowerCase().includes("limit")) {
+        showToast("Too many attempts — wait 60s and try again", "error");
+      } else {
+        showToast(`Error sending code: ${error.message}`, "error");
+      }
+      return;
+    }
+    setLoginStep("otp");
+    setOtpCooldown(60);
+    showToast(`Verification code sent to ${email} 📧`);
+  };
+
+  // ── STEP 2: VERIFY CODE & JOIN ──
+  const handleVerifyOtp = async () => {
+    const email = emailInput.trim().toLowerCase();
+    const token = otpInput.trim();
+    if (token.length < 6) {
+      showToast("Please enter the 6-digit code from your email", "error");
+      return;
+    }
     setJoinLoading(true);
+    const { error: otpError } = await supabase.auth.verifyOtp({ email, token, type: "email" });
+    if (otpError) {
+      setJoinLoading(false);
+      showToast("Invalid or expired code. Please try again.", "error");
+      return;
+    }
+
+    // Verified! Now find or create game user
     const name = extractName(email);
     let existing = users.find(u => u.email && u.email.toLowerCase() === email);
     if (!existing) existing = users.find(u => u.name.toLowerCase() === name.toLowerCase());
@@ -1074,12 +1171,14 @@ export default function Poplymarket() {
           </div>
         )}
         <div style={{ background: isBeforeLaunch ? "rgba(255,255,255,0.08)" : "#fff", border: `1px solid ${isBeforeLaunch ? "rgba(255,255,255,0.15)" : "#e2e8f0"}`, borderRadius: 20, padding: 32, boxShadow: isBeforeLaunch ? "0 4px 24px rgba(0,0,0,0.3)" : "0 4px 24px rgba(0,0,0,0.06)" }}>
+          {loginStep === "email" ? (
+            <>
               <div style={{ fontSize: 12, fontWeight: 600, color: isBeforeLaunch ? "#94a3b8" : "#64748b", letterSpacing: 0.8, marginBottom: 8, textAlign: "left" }}>YOUR ALTA EMAIL</div>
               <input
                 ref={emailInputRef}
                 value={emailInput}
                 onChange={e => setEmailInput(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && handleJoin()}
+                onKeyDown={e => e.key === "Enter" && handleSendOtp()}
                 placeholder="yourname@altahq.com"
                 type="email"
                 style={{
@@ -1092,13 +1191,69 @@ export default function Poplymarket() {
                 onFocus={e => e.target.style.borderColor = "#6366f1"}
                 onBlur={e => e.target.style.borderColor = isBeforeLaunch ? "rgba(255,255,255,0.2)" : "#e2e8f0"}
               />
-              <button onClick={handleJoin} disabled={joinLoading} style={{
+              <button onClick={handleSendOtp} disabled={otpLoading} style={{
+                width: "100%", padding: "14px", borderRadius: 12, border: "none",
+                background: otpLoading ? "#94a3b8" : "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "#fff",
+                fontSize: 15, fontWeight: 700, cursor: otpLoading ? "wait" : "pointer", fontFamily: "inherit",
+              }}>{otpLoading ? "Sending code..." : "Send Verification Code 📧"}</button>
+            </>
+          ) : (
+            <>
+              <div style={{
+                fontSize: 13, color: isBeforeLaunch ? "#c7d2fe" : "#6366f1", fontWeight: 600, marginBottom: 4,
+              }}>
+                📧 Code sent to
+              </div>
+              <div style={{
+                fontSize: 12, color: isBeforeLaunch ? "#94a3b8" : "#64748b", marginBottom: 20,
+                wordBreak: "break-all",
+              }}>
+                <strong style={{ color: isBeforeLaunch ? "#fff" : "#0f172a" }}>{emailInput.trim().toLowerCase()}</strong>
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: isBeforeLaunch ? "#94a3b8" : "#64748b", letterSpacing: 0.8, marginBottom: 8, textAlign: "left" }}>VERIFICATION CODE</div>
+              <input
+                ref={otpInputRef}
+                value={otpInput}
+                onChange={e => setOtpInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                onKeyDown={e => e.key === "Enter" && handleVerifyOtp()}
+                placeholder="000000"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                style={{
+                  width: "100%", padding: "13px 16px", borderRadius: 12,
+                  border: `1.5px solid ${isBeforeLaunch ? "rgba(255,255,255,0.2)" : "#e2e8f0"}`,
+                  fontSize: 28, fontFamily: "inherit", fontWeight: 700,
+                  outline: "none", boxSizing: "border-box", marginBottom: 16,
+                  color: isBeforeLaunch ? "#fff" : "#0f172a",
+                  background: isBeforeLaunch ? "rgba(255,255,255,0.08)" : "#f8fafc",
+                  textAlign: "center", letterSpacing: 12,
+                }}
+                onFocus={e => e.target.style.borderColor = "#6366f1"}
+                onBlur={e => e.target.style.borderColor = isBeforeLaunch ? "rgba(255,255,255,0.2)" : "#e2e8f0"}
+              />
+              <button onClick={handleVerifyOtp} disabled={joinLoading} style={{
                 width: "100%", padding: "14px", borderRadius: 12, border: "none",
                 background: joinLoading ? "#94a3b8" : "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "#fff",
                 fontSize: 15, fontWeight: 700, cursor: joinLoading ? "wait" : "pointer", fontFamily: "inherit",
-              }}>{joinLoading ? "Joining..." : isBeforeLaunch ? "Register & Secure Your Spot →" : "Enter the Market →"}</button>
+                marginBottom: 12,
+              }}>{joinLoading ? "Verifying..." : "Verify & Enter →"}</button>
+              <div style={{ display: "flex", justifyContent: "center", gap: 16 }}>
+                <button onClick={() => { setLoginStep("email"); setOtpInput(""); }} style={{
+                  background: "none", border: "none", color: isBeforeLaunch ? "#818cf8" : "#6366f1",
+                  fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", padding: "4px 8px",
+                }}>← Change email</button>
+                <button onClick={handleSendOtp} disabled={otpCooldown > 0 || otpLoading} style={{
+                  background: "none", border: "none",
+                  color: otpCooldown > 0 ? (isBeforeLaunch ? "#64748b" : "#94a3b8") : (isBeforeLaunch ? "#818cf8" : "#6366f1"),
+                  fontSize: 12, fontWeight: 600, cursor: otpCooldown > 0 ? "default" : "pointer", fontFamily: "inherit", padding: "4px 8px",
+                }}>{otpCooldown > 0 ? `Resend in ${otpCooldown}s` : "Resend code"}</button>
+              </div>
+            </>
+          )}
           <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 14 }}>
-            Alta employees only · <strong style={{ color: isBeforeLaunch ? "#818cf8" : "#6366f1" }}>1,000 ◈</strong> starting tokens
+            {loginStep === "email" ? "We'll send a verification code to your email" : "Check your inbox (and spam folder)"}
+            {" · "}<strong style={{ color: isBeforeLaunch ? "#818cf8" : "#6366f1" }}>1,000 ◈</strong> starting tokens
           </div>
         </div>
         <div style={{ display: "flex", justifyContent: "center", gap: 24, marginTop: 24 }}>
@@ -1114,8 +1269,11 @@ export default function Poplymarket() {
     </div>
   );
 
-  // Show countdown if before launch (admins bypass to full app)
-  if (isBeforeLaunch && !isAdmin) return <CountdownScreen users={users} currentUser={currentUser} />;
+  // Show countdown if before launch (admins bypass, explore mode passes through)
+  if (isBeforeLaunch && !isAdmin && !exploring) return <CountdownScreen users={users} currentUser={currentUser} onExplore={() => setExploring(true)} />;
+
+  // Betting is locked during countdown for non-admins
+  const bettingLocked = isBeforeLaunch && !isAdmin;
 
   // ── MAIN APP ──
   const tabs = [["markets", "📊 Markets"], ["leaderboard", "🏆 Leaderboard"], ["my bets", "🎲 My Bets"]];
@@ -1157,7 +1315,13 @@ export default function Poplymarket() {
           <div style={{ background: "#f1f5f9", borderRadius: 20, padding: "5px 12px", fontSize: 13, fontWeight: 500, color: "#475569" }}>
             {currentUser.name} {isAdmin && <span style={{ fontSize: 10, color: "#6366f1" }}>★</span>}
           </div>
-          <button onClick={() => { setCurrentUser(null); localStorage.removeItem("pm3-user"); }} style={{
+          {bettingLocked && (
+            <button onClick={() => setExploring(false)} style={{
+              background: "#eff6ff", border: "1px solid #c7d2fe", borderRadius: 8,
+              padding: "5px 10px", color: "#6366f1", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+            }}>← Countdown</button>
+          )}
+          <button onClick={async () => { await supabase.auth.signOut(); setCurrentUser(null); localStorage.removeItem("pm3-user"); setExploring(false); setLoginStep("email"); setOtpInput(""); }} style={{
             background: "transparent", border: "1px solid #e2e8f0", borderRadius: 8,
             padding: "5px 10px", color: "#94a3b8", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
           }}>← Out</button>
@@ -1209,12 +1373,30 @@ export default function Poplymarket() {
                 }}>{d}</button>
               ))}
             </div>
+            {bettingLocked && (
+              <div style={{
+                background: "linear-gradient(135deg, #eff6ff, #f5f3ff)", border: "1px solid #c7d2fe",
+                borderRadius: 12, padding: "12px 20px", marginBottom: 16,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              }}>
+                <span style={{ fontSize: 14 }}>👀</span>
+                <span style={{ fontSize: 13, color: "#4338ca", fontWeight: 600 }}>
+                  Preview mode — betting opens at {getLocalLaunchTime()}!
+                </span>
+              </div>
+            )}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(340px, 100%), 1fr))", gap: 12 }}>
               {filteredMarkets.map(m => (
                 <MarketCard
                   key={m.id} market={m} bets={bets} currentUser={currentUser}
-                  onBet={(market, dir) => { setBetMarket(market); setBetInitialDir(dir || "YES"); }}
-                  onSell={setSellBet}
+                  onBet={(market, dir) => {
+                    if (bettingLocked) { showToast(`Betting opens at ${getLocalLaunchTime()} — hang tight! ⏰`, "error"); return; }
+                    setBetMarket(market); setBetInitialDir(dir || "YES");
+                  }}
+                  onSell={(bet) => {
+                    if (bettingLocked) { showToast(`Trading opens at ${getLocalLaunchTime()} — hang tight! ⏰`, "error"); return; }
+                    setSellBet(bet);
+                  }}
                   resolution={resolutions.find(r => r.market_id === m.id)}
                 />
               ))}
