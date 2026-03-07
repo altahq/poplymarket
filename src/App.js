@@ -633,9 +633,7 @@ export default function Poplymarket() {
   const [resolutions, setResolutions] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [emailInput, setEmailInput] = useState("");
-  const [otpStep, setOtpStep] = useState(false);
-  const [otpCode, setOtpCode] = useState("");
-  const [otpLoading, setOtpLoading] = useState(false);
+  const [joinLoading, setJoinLoading] = useState(false);
   const [betMarket, setBetMarket] = useState(null);
   const [betInitialDir, setBetInitialDir] = useState("YES");
   const [sellBet, setSellBet] = useState(null);
@@ -712,41 +710,6 @@ export default function Poplymarket() {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // ── AUTH CALLBACK (handles email link clicks) ──
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if ((event === "SIGNED_IN" || event === "PASSWORD_RECOVERY") && session?.user?.email) {
-        const email = session.user.email.toLowerCase();
-        if (!email.endsWith(`@${ALLOWED_DOMAIN}`)) return;
-        // Clean URL hash
-        if (window.location.hash) window.history.replaceState(null, "", window.location.pathname);
-        // Find or create user in our table
-        const name = extractName(email);
-        const freshUsers = (await supabase.from("users").select("*")).data || users;
-        let existing = freshUsers.find(u => u.email && u.email.toLowerCase() === email);
-        if (!existing) existing = freshUsers.find(u => u.name.toLowerCase() === name.toLowerCase());
-        if (existing) {
-          if (!existing.email) {
-            await supabase.from("users").update({ email }).eq("name", existing.name);
-            existing = { ...existing, email };
-          }
-          setCurrentUser(existing);
-          localStorage.setItem("pm3-user", existing.name);
-          showToast(`Welcome back, ${existing.name}! 👋`);
-        } else {
-          const { data } = await supabase.from("users").insert({ name, email, tokens: INITIAL_TOKENS }).select().single();
-          if (data) {
-            setUsers(prev => [...prev, data]);
-            setCurrentUser(data);
-            localStorage.setItem("pm3-user", data.name);
-            fireConfetti();
-            showToast(`Welcome, ${name}! 🎯 1,000 tokens loaded`);
-          }
-        }
-      }
-    });
-    return () => subscription.unsubscribe();
-  }, [users, showToast]);
 
   useEffect(() => {
     if (!currentUser && emailInputRef.current) {
@@ -754,59 +717,17 @@ export default function Poplymarket() {
     }
   }, [currentUser]);
 
-  // ── STEP 1: SEND OTP CODE ──
-  const handleSendOtp = async () => {
+  // ── JOIN / LOGIN (simple email) ──
+  const handleJoin = async () => {
     const email = emailInput.trim().toLowerCase();
     if (!isValidEmail(email)) {
       showToast("Please enter a valid @altahq.com email", "error");
       return;
     }
-    setOtpLoading(true);
-    const { error } = await supabase.auth.signInWithOtp({ email });
-    setOtpLoading(false);
-    if (error) {
-      showToast(`Error sending code: ${error.message}`, "error");
-      return;
-    }
-    setOtpStep(true);
-    showToast("Code sent! Check your email 📧");
-  };
-
-  // ── STEP 2: VERIFY OTP & LOGIN ──
-  const handleVerifyOtp = async () => {
-    const email = emailInput.trim().toLowerCase();
-    const token = otpCode.trim();
-    if (!token || token.length < 6) {
-      showToast("Enter the 6-digit code from your email", "error");
-      return;
-    }
-    setOtpLoading(true);
-    try {
-      // Try "email" type first, then "signup", then "magiclink"
-      let verifyErr = null;
-      for (const otpType of ["email", "signup", "magiclink"]) {
-        const { error } = await supabase.auth.verifyOtp({ email, token, type: otpType });
-        if (!error) { verifyErr = null; break; }
-        verifyErr = error;
-      }
-      if (verifyErr) {
-        setOtpLoading(false);
-        showToast(`Invalid or expired code: ${verifyErr.message}`, "error");
-        return;
-      }
-    } catch (e) {
-      setOtpLoading(false);
-      showToast(`Verification error: ${e.message}`, "error");
-      return;
-    }
-    setOtpLoading(false);
-
-    // OTP verified — now find or create user in our users table
+    setJoinLoading(true);
     const name = extractName(email);
     let existing = users.find(u => u.email && u.email.toLowerCase() === email);
-    if (!existing) {
-      existing = users.find(u => u.name.toLowerCase() === name.toLowerCase());
-    }
+    if (!existing) existing = users.find(u => u.name.toLowerCase() === name.toLowerCase());
 
     if (existing) {
       if (!existing.email) {
@@ -815,18 +736,18 @@ export default function Poplymarket() {
       }
       setCurrentUser(existing);
       localStorage.setItem("pm3-user", existing.name);
-      setOtpStep(false);
-      setOtpCode("");
+      setJoinLoading(false);
       showToast(`Welcome back, ${existing.name}! 👋`);
       return;
     }
 
-    // Create new user
+    // New user
     const { data, error } = await supabase
       .from("users")
       .insert({ name, email, tokens: INITIAL_TOKENS })
       .select()
       .single();
+    setJoinLoading(false);
     if (error) {
       showToast(`Error: ${error.message}`, "error");
       return;
@@ -834,8 +755,6 @@ export default function Poplymarket() {
     setUsers(prev => [...prev, data]);
     setCurrentUser(data);
     localStorage.setItem("pm3-user", data.name);
-    setOtpStep(false);
-    setOtpCode("");
     fireConfetti();
     showToast(`Welcome, ${name}! 🎯 1,000 tokens loaded`);
   };
@@ -1009,14 +928,12 @@ export default function Poplymarket() {
         </div>
         <div style={{ color: "#64748b", fontSize: 14, marginBottom: 40 }}>Alta's March 2026 Prediction Market</div>
         <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 20, padding: 32, boxShadow: "0 4px 24px rgba(0,0,0,0.06)" }}>
-          {!otpStep ? (
-            <>
               <div style={{ fontSize: 12, fontWeight: 600, color: "#64748b", letterSpacing: 0.8, marginBottom: 8, textAlign: "left" }}>YOUR ALTA EMAIL</div>
               <input
                 ref={emailInputRef}
                 value={emailInput}
                 onChange={e => setEmailInput(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && handleSendOtp()}
+                onKeyDown={e => e.key === "Enter" && handleJoin()}
                 placeholder="yourname@altahq.com"
                 type="email"
                 style={{
@@ -1027,47 +944,11 @@ export default function Poplymarket() {
                 onFocus={e => e.target.style.borderColor = "#6366f1"}
                 onBlur={e => e.target.style.borderColor = "#e2e8f0"}
               />
-              <button onClick={handleSendOtp} disabled={otpLoading} style={{
+              <button onClick={handleJoin} disabled={joinLoading} style={{
                 width: "100%", padding: "14px", borderRadius: 12, border: "none",
-                background: otpLoading ? "#94a3b8" : "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "#fff",
-                fontSize: 15, fontWeight: 700, cursor: otpLoading ? "wait" : "pointer", fontFamily: "inherit",
-              }}>{otpLoading ? "Sending..." : "Send Verification Code →"}</button>
-            </>
-          ) : (
-            <>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "#16a34a", letterSpacing: 0.8, marginBottom: 4, textAlign: "left" }}>✓ CODE SENT TO</div>
-              <div style={{ fontSize: 14, color: "#0f172a", fontWeight: 600, marginBottom: 16, textAlign: "left" }}>{emailInput.trim().toLowerCase()}</div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "#64748b", letterSpacing: 0.8, marginBottom: 8, textAlign: "left" }}>ENTER 6-DIGIT CODE</div>
-              <input
-                value={otpCode}
-                onChange={e => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                onKeyDown={e => e.key === "Enter" && handleVerifyOtp()}
-                placeholder="000000"
-                type="text"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                autoFocus
-                style={{
-                  width: "100%", padding: "13px 16px", borderRadius: 12,
-                  border: "1.5px solid #e2e8f0", fontSize: 24, fontFamily: "inherit",
-                  outline: "none", boxSizing: "border-box", marginBottom: 16, color: "#0f172a",
-                  background: "#f8fafc", textAlign: "center", letterSpacing: 8, fontWeight: 700,
-                }}
-                onFocus={e => e.target.style.borderColor = "#6366f1"}
-                onBlur={e => e.target.style.borderColor = "#e2e8f0"}
-              />
-              <button onClick={handleVerifyOtp} disabled={otpLoading} style={{
-                width: "100%", padding: "14px", borderRadius: 12, border: "none",
-                background: otpLoading ? "#94a3b8" : "linear-gradient(135deg, #16a34a, #15803d)", color: "#fff",
-                fontSize: 15, fontWeight: 700, cursor: otpLoading ? "wait" : "pointer", fontFamily: "inherit",
-              }}>{otpLoading ? "Verifying..." : "Verify & Enter the Market →"}</button>
-              <button onClick={() => { setOtpStep(false); setOtpCode(""); }} style={{
-                width: "100%", padding: "10px", borderRadius: 12, border: "none",
-                background: "transparent", color: "#64748b",
-                fontSize: 13, cursor: "pointer", fontFamily: "inherit", marginTop: 8,
-              }}>← Use a different email</button>
-            </>
-          )}
+                background: joinLoading ? "#94a3b8" : "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "#fff",
+                fontSize: 15, fontWeight: 700, cursor: joinLoading ? "wait" : "pointer", fontFamily: "inherit",
+              }}>{joinLoading ? "Joining..." : "Enter the Market →"}</button>
           <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 14 }}>
             Alta employees only · <strong style={{ color: "#6366f1" }}>1,000 ◈</strong> starting tokens · Shares go up when others agree with you
           </div>
