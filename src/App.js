@@ -18,8 +18,7 @@ const ALLOWED_DOMAIN = "altahq.com";
 // Asia/Jerusalem is UTC+2 in winter → 15:00 UTC
 const LAUNCH_TIME = new Date("2026-03-09T17:00:00+02:00").getTime();
 
-// Launch time display string
-const LAUNCH_DISPLAY = "Monday 17:00 Israel time (15:00 UTC)";
+// (no launch time display — just countdown)
 
 function extractName(email) {
   const local = email.split("@")[0];
@@ -287,7 +286,7 @@ function CountdownScreen({ users, currentUser, onExplore }) {
           borderRadius: 16, padding: "20px 28px", marginBottom: 32,
         }}>
           <div style={{ fontSize: 13, color: "#cbd5e1", marginBottom: 4 }}>
-            🕗 <strong style={{ color: "#fff" }}>{LAUNCH_DISPLAY}</strong>
+            🕗 Betting opens when the countdown hits zero
           </div>
           <div style={{ fontSize: 12, color: "#64748b" }}>
             {MARKETS.length} markets · 1,000 ◈ starting tokens · Bet on Alta's March goals
@@ -1283,7 +1282,7 @@ export default function Poplymarket() {
               }}>
                 <span style={{ fontSize: 14 }}>👀</span>
                 <span style={{ fontSize: 13, color: "#4338ca", fontWeight: 600 }}>
-                  Preview mode — betting opens at {getLocalLaunchTime()}!
+                  Preview mode — betting opens soon!
                 </span>
               </div>
             )}
@@ -1292,11 +1291,11 @@ export default function Poplymarket() {
                 <MarketCard
                   key={m.id} market={m} bets={bets} currentUser={currentUser}
                   onBet={(market, dir) => {
-                    if (bettingLocked) { showToast(`Betting opens at ${getLocalLaunchTime()} — hang tight! ⏰`, "error"); return; }
+                    if (bettingLocked) { showToast("Betting isn't open yet — hang tight! ⏰", "error"); return; }
                     setBetMarket(market); setBetInitialDir(dir || "YES");
                   }}
                   onSell={(bet) => {
-                    if (bettingLocked) { showToast(`Trading opens at ${getLocalLaunchTime()} — hang tight! ⏰`, "error"); return; }
+                    if (bettingLocked) { showToast("Trading isn't open yet — hang tight! ⏰", "error"); return; }
                     setSellBet(bet);
                   }}
                   resolution={resolutions.find(r => r.market_id === m.id)}
