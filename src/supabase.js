@@ -8,6 +8,5 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     detectSessionInUrl: true,
     flowType: 'implicit',
-    lockManager: false,           // Disable Web Locks API to prevent multi-tab deadlocks
   }
 })

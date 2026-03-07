@@ -781,12 +781,25 @@ export default function Poplymarket() {
       return;
     }
     setOtpLoading(true);
-    const { error: verifyErr } = await supabase.auth.verifyOtp({ email, token, type: "email" });
-    setOtpLoading(false);
-    if (verifyErr) {
-      showToast("Invalid or expired code. Try again.", "error");
+    try {
+      // Try "email" type first, then "signup", then "magiclink"
+      let verifyErr = null;
+      for (const otpType of ["email", "signup", "magiclink"]) {
+        const { error } = await supabase.auth.verifyOtp({ email, token, type: otpType });
+        if (!error) { verifyErr = null; break; }
+        verifyErr = error;
+      }
+      if (verifyErr) {
+        setOtpLoading(false);
+        showToast(`Invalid or expired code: ${verifyErr.message}`, "error");
+        return;
+      }
+    } catch (e) {
+      setOtpLoading(false);
+      showToast(`Verification error: ${e.message}`, "error");
       return;
     }
+    setOtpLoading(false);
 
     // OTP verified — now find or create user in our users table
     const name = extractName(email);
