@@ -676,6 +676,12 @@ export default function Poplymarket() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Safety: never stay stuck on loading spinner
+  useEffect(() => {
+    const t = setTimeout(() => setLoading(false), 6000);
+    return () => clearTimeout(t);
+  }, []);
+
   // ── REALTIME SUBSCRIPTIONS ──
   useEffect(() => {
     const channel = supabase
