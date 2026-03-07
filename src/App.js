@@ -18,11 +18,8 @@ const ALLOWED_DOMAIN = "altahq.com";
 // Asia/Jerusalem is UTC+2 in winter → 15:00 UTC
 const LAUNCH_TIME = new Date("2026-03-09T17:00:00+02:00").getTime();
 
-// Format launch time in the viewer's local timezone
-function getLocalLaunchTime() {
-  const d = new Date(LAUNCH_TIME);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true });
-}
+// Launch time display string
+const LAUNCH_DISPLAY = "Monday 17:00 Israel time (15:00 UTC)";
 
 function extractName(email) {
   const local = email.split("@")[0];
@@ -290,7 +287,7 @@ function CountdownScreen({ users, currentUser, onExplore }) {
           borderRadius: 16, padding: "20px 28px", marginBottom: 32,
         }}>
           <div style={{ fontSize: 13, color: "#cbd5e1", marginBottom: 4 }}>
-            🕗 Tonight at <strong style={{ color: "#fff" }}>{getLocalLaunchTime()}</strong> (your time)
+            🕗 <strong style={{ color: "#fff" }}>{LAUNCH_DISPLAY}</strong>
           </div>
           <div style={{ fontSize: 12, color: "#64748b" }}>
             {MARKETS.length} markets · 1,000 ◈ starting tokens · Bet on Alta's March goals
