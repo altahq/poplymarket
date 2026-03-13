@@ -137,20 +137,29 @@ function calcBuyShares(bets, marketId, direction, amount) {
   return { shares: amount / avgPrice, avgPrice, prePrice, postPrice };
 }
 
-// Log-based integral average price for selling — 2% fee prevents round-trip exploit
+// Sell payout uses AMM price curve (price movement matters) but capped at
+// original amount to prevent creating tokens from nowhere.
+// Price moved against you → you lose money. Price moved for you → get back at most what you paid.
+// Profit only at resolution. 2% fee on top.
 function calcSellPayout(bets, bet) {
   const { yesAmt, noAmt } = getPoolAmounts(bets, bet.market_id);
   const total = yesAmt + noAmt;
   const opposite = bet.direction === "YES" ? noAmt : yesAmt;
+  const same = bet.direction === "YES" ? yesAmt : noAmt;
 
-  // Safety: can't sell if it would empty the pool
-  if (bet.amount >= total - 1) return 0;
+  // Safety: can't sell if it would empty the pool below SEED
+  if (bet.amount >= same - SEED) return 0;
 
-  // True average sell price = integral of price curve as pool decreases
+  // Average sell price from AMM curve as pool decreases
   const avgSellPrice = 1 - (opposite / bet.amount) * Math.log(total / (total - bet.amount));
 
-  // 2% sell fee + floor to eliminate any remaining exploit
-  return Math.floor((bet.shares || 0) * avgSellPrice * 0.98);
+  // Market-based payout (reflects price movement — can be less than amount)
+  const marketPayout = (bet.shares || 0) * avgSellPrice;
+
+  // Cap at original amount — profit only at resolution, not from selling
+  const cappedPayout = Math.min(marketPayout, bet.amount);
+
+  return Math.floor(cappedPayout * 0.98);
 }
 
 function getProb(bets, marketId) {
