@@ -137,10 +137,7 @@ function calcBuyShares(bets, marketId, direction, amount) {
   return { shares: amount / avgPrice, avgPrice, prePrice, postPrice };
 }
 
-// Sell payout uses AMM price curve (price movement matters) but capped at
-// original amount to prevent creating tokens from nowhere.
-// Price moved against you → you lose money. Price moved for you → get back at most what you paid.
-// Profit only at resolution. 2% fee on top.
+// Log-based integral average price for selling — 2% fee prevents round-trip exploit
 function calcSellPayout(bets, bet) {
   const { yesAmt, noAmt } = getPoolAmounts(bets, bet.market_id);
   const total = yesAmt + noAmt;
@@ -150,16 +147,11 @@ function calcSellPayout(bets, bet) {
   // Safety: can't sell if it would empty the pool below SEED
   if (bet.amount >= same - SEED) return 0;
 
-  // Average sell price from AMM curve as pool decreases
+  // True average sell price = integral of price curve as pool decreases
   const avgSellPrice = 1 - (opposite / bet.amount) * Math.log(total / (total - bet.amount));
 
-  // Market-based payout (reflects price movement — can be less than amount)
-  const marketPayout = (bet.shares || 0) * avgSellPrice;
-
-  // Cap at original amount — profit only at resolution, not from selling
-  const cappedPayout = Math.min(marketPayout, bet.amount);
-
-  return Math.floor(cappedPayout * 0.98);
+  // 2% sell fee + floor to eliminate any remaining exploit
+  return Math.floor((bet.shares || 0) * avgSellPrice * 0.98);
 }
 
 function getProb(bets, marketId) {
@@ -983,14 +975,20 @@ export default function Poplymarket() {
 
   // ── SELL POSITION ──
   const handleSell = async (bet, payout) => {
-    // Mark bet as sold
-    const { error: sellError } = await supabase
+    // Mark bet as sold — use .select() to verify the update actually happened (RLS can silently block)
+    const { data: soldData, error: sellError } = await supabase
       .from("bets")
       .update({ status: "sold" })
-      .eq("id", bet.id);
+      .eq("id", bet.id)
+      .select();
 
     if (sellError) {
       showToast(`Error: ${sellError.message}`, "error");
+      return;
+    }
+
+    if (!soldData || soldData.length === 0) {
+      showToast("Sell failed — please try again", "error");
       return;
     }
 
